@@ -1,0 +1,6 @@
+[submodule "submodules/DepthAnythingV2_docker"]
+	path = submodules/DepthAnythingV2_docker
+	url = git@github.com:bidbest/DepthAnythingV2_docker.git
+[submodule "submodules/gaussian-splatting"]
+	path = submodules/gaussian-splatting
+	url = git@github.com:graphdeco-inria/gaussian-splatting.git
