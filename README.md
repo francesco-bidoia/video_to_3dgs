@@ -82,13 +82,6 @@ The pipeline generates the following directories:
 Use the webtool: [supersplat](https://superspl.at/editor)
 Simply drag and drop the .ply file in the browser
 
-## Troubleshooting
-
-- **CUDA out of memory errors**: Reduce the number of frames with the `-n` parameter
-- **Poor reconstruction quality**: Try using the `-c` flag to clean and restart the process
-- **Missing depth maps**: Ensure the Depth Anything V2 model is correctly installed
-- **Display/GUI issues**: The start.sh script automatically configures X11 forwarding based on your environment (WSL1, WSL2, or native Linux). If you encounter display problems, check the console output for the detected environment and X11 socket path
-
 ## License
 
 See the [LICENSE](LICENSE) file for details.

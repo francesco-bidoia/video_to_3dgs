@@ -501,7 +501,7 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, averag
         final = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=False, image_list=[])
         
         if final is None:
-            print(" Canno reconstruct with full matcher. Using sequential")
+            print(" Cannot reconstruct with full matcher. Using sequential")
             final = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=True, image_list=[])
             # sys.exit(1)
 
@@ -552,115 +552,6 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, averag
         destination_file = os.path.join(source_path, "sparse", "0", file)
         shutil.move(source_file, destination_file)
 
-def evaluate_frame_contribution(reconstruction: pycolmap.Reconstruction,
-                               frame_indices: List[int]) -> Dict[int, float]:
-    """
-    Evaluate the contribution of each frame to the reconstruction quality.
-    
-    Parameters:
-        reconstruction: COLMAP reconstruction object
-        frame_indices: List of frame indices to evaluate
-        
-    Returns:
-        Dictionary mapping frame indices to contribution scores
-    """
-    from utils import _name_to_ind
-    from metrics import compute_overlaps_in_rec
-    
-    # Get mapping from frame indices to image IDs
-    frame_to_image = {}
-    for image_id in reconstruction.images:
-        image = reconstruction.images[image_id]
-        frame_idx = _name_to_ind(image.name)
-        frame_to_image[frame_idx] = image_id
-    
-    # Compute baseline overlap metrics
-    baseline_overlaps, _ = compute_overlaps_in_rec(reconstruction)
-    baseline_min = np.min(baseline_overlaps) if baseline_overlaps else 0
-    baseline_avg = np.mean(baseline_overlaps) if baseline_overlaps else 0
-    baseline_points = len(reconstruction.points3D)
-    
-    # Evaluate contribution of each frame
-    contributions = {}
-    for frame_idx in frame_indices:
-        if frame_idx not in frame_to_image:
-            # Frame not in reconstruction
-            contributions[frame_idx] = 0.0
-            continue
-        
-        image_id = frame_to_image[frame_idx]
-        
-        # Create a copy of the reconstruction without this frame
-        rec_copy = pycolmap.Reconstruction(reconstruction)
-        rec_copy.deregister_image(image_id)
-        
-        # Compute overlap metrics without this frame
-        new_overlaps, _ = compute_overlaps_in_rec(rec_copy)
-        new_min = np.min(new_overlaps) if new_overlaps else 0
-        new_avg = np.mean(new_overlaps) if new_overlaps else 0
-        new_points = len(rec_copy.points3D)
-        
-        # Compute contribution score based on changes in metrics
-        # Higher score means more important frame
-        min_overlap_change = baseline_min - new_min
-        avg_overlap_change = baseline_avg - new_avg
-        points_change = baseline_points - new_points
-        
-        # Normalize and combine metrics
-        contribution = (
-            0.3 * min_overlap_change / (baseline_min + 1e-6) +
-            0.3 * avg_overlap_change / (baseline_avg + 1e-6) +
-            0.4 * points_change / (baseline_points + 1e-6)
-        )
-        
-        contributions[frame_idx] = max(0.0, contribution)
-    
-    return contributions
-
-def prune_low_contribution_frames(reconstruction: pycolmap.Reconstruction,
-                                 threshold: float = 0.05) -> pycolmap.Reconstruction:
-    """
-    Remove frames that don't contribute significantly to the reconstruction.
-    
-    Parameters:
-        reconstruction: COLMAP reconstruction object
-        threshold: Minimum contribution threshold
-        
-    Returns:
-        Pruned reconstruction
-    """
-    from utils import _name_to_ind
-    
-    # Get frame indices
-    frame_indices = []
-    for image_id in reconstruction.images:
-        image = reconstruction.images[image_id]
-        frame_idx = _name_to_ind(image.name)
-        frame_indices.append(frame_idx)
-    
-    # Evaluate frame contributions
-    contributions = evaluate_frame_contribution(reconstruction, frame_indices)
-    
-    # Identify frames to remove
-    frames_to_remove = [idx for idx, score in contributions.items() if score < threshold]
-    print(f"Removing {len(frames_to_remove)} low-contribution frames out of {len(frame_indices)}")
-    
-    # Create a copy of the reconstruction
-    pruned_rec = pycolmap.Reconstruction(reconstruction)
-    
-    # Remove low-contribution frames
-    frame_to_image = {}
-    for image_id in reconstruction.images:
-        image = reconstruction.images[image_id]
-        frame_idx = _name_to_ind(image.name)
-        frame_to_image[frame_idx] = image_id
-    
-    for frame_idx in frames_to_remove:
-        if frame_idx in frame_to_image:
-            image_id = frame_to_image[frame_idx]
-            pruned_rec.deregister_image(image_id)
-    
-    return pruned_rec
 
 def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False, average_overlap=100,
                  random_ratio=0.2, pruning_threshold=0.05, coverage_weight=0.4, triangulation_weight=0.3,
