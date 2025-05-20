@@ -32,9 +32,12 @@ The pipeline consists of the following steps:
 
 3. Build and start the Docker container:
    ```bash
-   ./start.sh
+   ./start.sh [--dataset=/path/to/dataset_gs]
    ```
-   This script will automatically build the Docker container with all required dependencies.
+   This script will:
+   - Automatically build the Docker container with all required dependencies
+   - Detect your environment (WSL1, WSL2, or native Linux) and configure X11 forwarding
+   - Use the default dataset path (`../datasets_gs`) or a custom path specified with `--dataset`
 
 ## Usage
 
@@ -45,6 +48,11 @@ The pipeline consists of the following steps:
    datasets_gs/your_scene_name/your_video.mp4
    ```
    The video file can have any name with a `.mp4` extension.
+
+   By default, the pipeline looks for datasets in the `../datasets_gs` directory relative to the project root. You can specify a different location when starting the container:
+   ```bash
+   ./start.sh --dataset=/path/to/your/datasets
+   ```
 
 ### Running the Pipeline
 
@@ -79,6 +87,7 @@ Simply drag and drop the .ply file in the browser
 - **CUDA out of memory errors**: Reduce the number of frames with the `-n` parameter
 - **Poor reconstruction quality**: Try using the `-c` flag to clean and restart the process
 - **Missing depth maps**: Ensure the Depth Anything V2 model is correctly installed
+- **Display/GUI issues**: The start.sh script automatically configures X11 forwarding based on your environment (WSL1, WSL2, or native Linux). If you encounter display problems, check the console output for the detected environment and X11 socket path
 
 ## License
 
