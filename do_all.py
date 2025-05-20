@@ -223,7 +223,7 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser(description="Video to 3D Gaussian Splatting Pipeline")
     parser.add_argument("--source_path", "-s", required=True, type=str,
-                        help="Path to the directory containing the video")
+                        help="Path to the directory containing the video. Use aboslute path! /v2gs/dataset_gs/your_folder")
     parser.add_argument("--max_number_of_frames", "-n", default=400, type=int,
                         help="Maximum number of frames to extract (default: 400)")
     parser.add_argument("--clean", "-c", action='store_true',
