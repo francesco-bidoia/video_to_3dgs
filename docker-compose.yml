@@ -10,20 +10,16 @@ services:
       - DISPLAY=:0
       - MESA_GL_VERSION_OVERRIDE=4.5 # Needed for running viewers
     volumes:
-      # This volume is needed for WSL
+      # X11 socket mount - path determined by start.sh
       - type: bind
-        source: /mnt/wslg/.X11-unix
+        source: ${X11_SOCKET_PATH:-/tmp/.X11-unix}
         target: /tmp/.X11-unix
-      ##########################
-      # - type: bind
-      #   source: /tmp/.X11-unix
-      #   target: /tmp/.X11-unix
       # This is needed to import your own datasets
       - type: bind
         source: ./
         target: /v2gs
       - type: bind
-        source: ../datasets_gs
+        source: ${DATASET_GS_PATH:-../datasets_gs}
         target: /v2gs/datasets_gs
     deploy:
       resources:
