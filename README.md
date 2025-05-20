@@ -22,7 +22,7 @@ The pipeline consists of the following steps:
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/video_to_3dgs.git
+   git clone --recursive https://github.com/yourusername/video_to_3dgs.git
    cd video_to_3dgs
    ```
 
@@ -71,12 +71,8 @@ The pipeline generates the following directories:
 
 ## Viewing Results
 
-After processing completes, you can view the 3D Gaussian Splatting model using the viewer provided in the gaussian-splatting submodule:
-
-```bash
-cd submodules/gaussian-splatting
-python render.py -m /v2gs/datasets_gs/your_scene_name/model
-```
+Use the webtool: [supersplat](https://superspl.at/editor)
+Simply drag and drop the .ply file in the browser
 
 ## Troubleshooting
 

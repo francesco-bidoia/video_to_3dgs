@@ -175,11 +175,7 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False):
     print(f"  - 3D Gaussian Splatting time: {end_time - depth_time:.2f}s")
     print(f"{'='*80}\n")
     
-    print(f"Results saved to: {model_p}")
-    print(f"To view the model, run:")
-    print(f"  cd {CURR_PATH}/submodules/gaussian-splatting")
-    print(f"  python render.py -m {model_p}")
-    
+    print(f"Results saved to: {model_p}")    
     return True
 
 def main(args):
