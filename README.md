@@ -7,6 +7,7 @@ Download Depth-Anything-V2-Large from here: https://github.com/DepthAnything/Dep
 We provide a dockerfile and a start script.
 Simply run ./start.sh to enter the container (it will build it automatically)
 
+This has been tested in wsl2 and Ubunut 22
 
 # How to use
 We assume there is a fodler called dataset_gs at the same level as this repo.
