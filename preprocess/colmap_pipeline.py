@@ -74,6 +74,76 @@ def feature_matching(db_path, sequential):
         logging.error(f"Feature matching failed with code {exit_code}. Exiting.")
         exit(exit_code)
 
+def count_total_images_in_multiple_reconstructions(reconstructions):
+    tot_images = 0
+
+    for rec_i in reconstructions.keys():
+        tot_images += reconstructions[rec_i].num_images()
+    
+    return tot_images
+
+def _from_img_name_to_img_num(img_name):
+    tmp = img_name.split(".")[0]
+    return int(tmp)
+
+def get_images_names_from_reconstructions(reconstructions):
+
+    images_names = []
+    for rec_i in reconstructions.keys():
+        tmp_rec = reconstructions[rec_i]
+        tmp_images_names = sorted([_from_img_name_to_img_num(tmp_rec.images[i].name) for i in tmp_rec.images])
+
+        images_names.append(tmp_images_names)
+    
+    return images_names
+
+def compute_intervals_that_needs_more_images(rec_img_ids, all_img_ids, increase_ratio = 1.3):
+
+    # Since batch can overlap, we first want to know which images are in reconstructions and which aren't.
+    
+    all_img_ids_is_rec = np.zeros(len(all_img_ids))
+    for tmp in rec_img_ids:
+        for ind_img in tmp:
+            ind = all_img_ids.index(ind_img)
+            all_img_ids_is_rec[ind] = 1
+
+    # import pdb; pdb.set_trace()
+
+    # now we look for images not registered, and we create ranges containing all non registered images
+    range_non_rec = []
+    n_images_for_range = []
+    cnt = 0
+    for i in range(len(all_img_ids)):
+
+        val = all_img_ids_is_rec[i]
+
+        if val == 0 and cnt == 0:
+            if i > 0:
+                start = all_img_ids[i-1]
+            else:
+                start = all_img_ids[i]
+            cnt = 1
+            continue
+        
+        elif val == 0 and cnt >= 1:
+            # This means is a consecutive non registered, we count it
+            cnt += 1
+
+        elif val == 1 and cnt >= 1:
+            # After encountering a non-registered image  we find a registered image. we save this range
+            end = all_img_ids[i]
+            range_non_rec.append((start, end))
+            n_images_for_range.append(cnt+1)
+            cnt = 0
+    
+    # import pdb; pdb.set_trace()
+    n_frame_to_generate = np.asarray(n_images_for_range, dtype=np.float32) * increase_ratio
+    n_frame_to_generate = np.ceil(n_frame_to_generate).astype(np.int32)
+    # import pdb; pdb.set_trace()
+
+    return range_non_rec, n_frame_to_generate
+    
+
 def reconstruct(source_path, db_path, image_path, output_path, image_list, existing_sparse='', clean=True, sequential=True, threshold=0.8):
     """
     Perform COLMAP incremental mapping to reconstruct a 3D scene.
@@ -110,7 +180,7 @@ def reconstruct(source_path, db_path, image_path, output_path, image_list, exist
             rec = reconstructions[tmp_rec]
             break
 
-    return rec
+    return rec, image_list, reconstructions
 
 
 def iterative_reconstruc(source_path, db_path, image_path, output_path, image_list, fmw, video_n, max_iter=15):
@@ -133,16 +203,50 @@ def iterative_reconstruc(source_path, db_path, image_path, output_path, image_li
     n_frames = int(fmw.duration / 2)
     print(f" testing reconstruction with {n_frames} frames")
     frames_list = fmw.get_list_of_n_frames(n_frames)
-    rec = reconstruct(source_path, db_path, image_path, output_path, frames_list)
+    rec, frames_list, reconstructions = reconstruct(source_path, db_path, image_path, output_path, frames_list)
     itr = 1
+
+    # increase until we get at least 50% ratio of reconstructed images 
 
     while rec is None and itr < max_iter:
         clean_paths(source_path, video_n, db_path)
         make_folders(source_path)
-        n_frames = int(n_frames * 1.3)
-        print(f" testing reconstruction with {n_frames} frames")
-        frames_list = fmw.get_list_of_n_frames(n_frames)
-        rec = reconstruct(source_path, db_path, image_path, output_path, frames_list)
+
+        # Check percentage reconstructed
+        n_rec_images = count_total_images_in_multiple_reconstructions(reconstructions)
+        ratio_reconstructed = n_rec_images / len(frames_list)
+
+        ##############################################
+        ############# DEBUG ##########################
+        rec_images = count_total_images_in_multiple_reconstructions(reconstructions)
+        print(f"recunstructed {rec_images} / {len(frames_list)}\nRatio: {rec_images / len(frames_list)}")
+        rec_img_names = get_images_names_from_reconstructions(reconstructions)
+        all_img_names = [_from_img_name_to_img_num(os.path.basename(i)) for i in frames_list]
+        # import pdb; pdb.set_trace()
+        ##############################################
+        
+        if ratio_reconstructed < 0.4:
+            # increase until we get at least 40% ratio of reconstructed images 
+            n_frames = int(n_frames * 1.3)
+            print(f" testing reconstruction with {n_frames} frames")
+            frames_list = fmw.get_list_of_n_frames(n_frames)
+            rec, frames_list, reconstructions = reconstruct(source_path, db_path, image_path, output_path, frames_list)
+
+        else:
+            # Only increase between batches reconstructed 
+            rec_img_ids = get_images_names_from_reconstructions(reconstructions)
+            # Get all the indexs we are trying to reconstruct 
+            all_img_ids = [_from_img_name_to_img_num(os.path.basename(i)) for i in frames_list]
+
+            (pairs_to_interp, n_frame_to_generate) = compute_intervals_that_needs_more_images(rec_img_ids, all_img_ids)
+            for pair, n_frames in zip(pairs_to_interp, n_frame_to_generate):
+                frames_list.extend(fmw.get_list_of_n_frames(n_frames, pair[0], pair[1]))
+            
+            frames_list = list(set(frames_list))
+            frames_list.sort()
+            # import pdb; pdb.set_trace()
+            rec, frames_list, reconstructions = reconstruct(source_path, db_path, image_path, output_path, frames_list)
+
         itr += 1
     
     if itr >= max_iter:
@@ -307,7 +411,7 @@ def incremental_reconstruction(source_path, db_path, image_path, output_path, im
         # Remove duplicates while preserving order.
         image_list = list(dict.fromkeys(image_list))
         
-        tmp = reconstruct(source_path, db_path, image_path, output_path, image_list, output_path, clean=False)
+        tmp, _, _ = reconstruct(source_path, db_path, image_path, output_path, image_list, output_path, clean=False)
         if tmp is None:
             print(len(image_list))
             print("New reconstruction failed ...")
@@ -498,11 +602,11 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, averag
             frame_indices = sorted([_name_to_ind(rec2.images[i].name) for i in sorted_ids])
 
         fmw.extract_specific_frames(frame_indices)
-        final = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=False, image_list=[])
+        final, _, _ = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=False, image_list=[])
         
         if final is None:
             print(" Cannot reconstruct with full matcher. Using sequential")
-            final = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=True, image_list=[])
+            final, _, _ = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=True, image_list=[])
             # sys.exit(1)
 
         final.write_binary(distorted_sparse_0_path)
@@ -628,41 +732,45 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
         # Use advanced frame selection strategy
         from visibility_prediction import compute_visibility_sampled
         from frame_selection import adaptive_frame_selection
-        
-        print("Computing visibility for all frames...")
-        camera_id = next(iter(rec.cameras))
-        camera = rec.cameras[camera_id]
-        all_visibility = compute_visibility_sampled(rec, all_poses, camera)
-        
-        n_new_frames = n_images - len(frames_list)
-        n_new_frames = max(1, n_new_frames)
 
-        print("Selecting frames using adaptive strategy...")
-        selected_frames = adaptive_frame_selection(
-            rec,
-            all_poses,
-            all_visibility,
-            n_frames=n_new_frames,
-            random_ratio=random_ratio,
-            coverage_weight=coverage_weight,
-            triangulation_weight=triangulation_weight,
-            diversity_weight=diversity_weight,
-            confidence_weight=confidence_weight
-        )
-        print(f"Selected {len(selected_frames)} frames for reconstruction")
-        
-        # Convert frame indices to file paths
-        selected_frames_paths = [fmw.ind_to_frame_name(idx) for idx in selected_frames]
-        
-        # Add selected frames to the existing frames list
-        frames_list.extend(selected_frames_paths)
-        
-        # Remove duplicates while preserving order
-        frames_list = list(dict.fromkeys(frames_list))
-        
-        # Perform reconstruction with the selected frames
-        print("Performing reconstruction with selected frames...")
-        rec2 = reconstruct(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, distorted_sparse_path, clean=False)
+        n_new_frames = n_images - len(frames_list)
+
+        # Only perform if more frame needed.
+        if n_new_frames > 0:
+            print("Computing visibility for all frames...")
+            camera_id = next(iter(rec.cameras))
+            camera = rec.cameras[camera_id]
+            all_visibility = compute_visibility_sampled(rec, all_poses, camera)
+
+            print("Selecting frames using adaptive strategy...")
+            selected_frames = adaptive_frame_selection(
+                rec,
+                all_poses,
+                all_visibility,
+                n_frames=n_new_frames,
+                random_ratio=random_ratio,
+                coverage_weight=coverage_weight,
+                triangulation_weight=triangulation_weight,
+                diversity_weight=diversity_weight,
+                confidence_weight=confidence_weight
+            )
+            print(f"Selected {len(selected_frames)} frames for reconstruction")
+            
+            # Convert frame indices to file paths
+            selected_frames_paths = [fmw.ind_to_frame_name(idx) for idx in selected_frames]
+            
+            # Add selected frames to the existing frames list
+            frames_list.extend(selected_frames_paths)
+            
+            # Remove duplicates while preserving order
+            frames_list = list(dict.fromkeys(frames_list))
+            
+            # Perform reconstruction with the selected frames
+            print("Performing reconstruction with selected frames...")
+            rec2, _, _ = reconstruct(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, distorted_sparse_path, clean=False)
+            
+        else:
+            rec2 = rec
         
         if rec2 is None:
             print("Enhanced frame selection failed, falling back to incremental reconstruction...")
@@ -678,7 +786,7 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
             frames_list = [os.path.join(fmw.tmp_path, rec2.images[i].name) for i in rec2.images]
             
             print(f"Removed {len(removed_frames)} frames, keeping {len(frames_list)} frames")
-                            
+
     print(rec2.summary())
     
     # Step 4: Final reconstruction (same as in do_one)
@@ -696,11 +804,11 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
         frame_indices = sorted([_name_to_ind(rec2.images[i].name) for i in sorted_ids])
 
         fmw.extract_specific_frames(frame_indices)
-        final = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=False, image_list=[])
+        final, _, _ = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=False, image_list=[])
         
         if final is None:
             print("Cannot reconstruct with full matcher. Using sequential")
-            final = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=True, image_list=[])
+            final, _, _ = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=True, image_list=[])
 
         final.write_binary(distorted_sparse_0_path)
     
