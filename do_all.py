@@ -132,27 +132,27 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False):
     
     sfm_time = time.time()
     
-    # Step 2: Estimate depth maps
-    if not os.path.isdir(depths_p):
-        print("\n--- Step 2: Depth estimation ---")
-        depth_command = f"cd {CURR_PATH}/submodules/DepthAnythingV2_docker/ && python run.py --encoder vitl --pred-only --grayscale --img-path {images_p} --outdir {depths_p}"
+    # # Step 2: Estimate depth maps
+    # if not os.path.isdir(depths_p):
+    #     print("\n--- Step 2: Depth estimation ---")
+    #     depth_command = f"cd {CURR_PATH}/submodules/DepthAnythingV2_docker/ && python run.py --encoder vitl --pred-only --grayscale --img-path {images_p} --outdir {depths_p}"
         
-        if not run_command(depth_command, "Failed during depth estimation"):
-            return False
+    #     if not run_command(depth_command, "Failed during depth estimation"):
+    #         return False
     
-    # Step 3: Estimate depth scale
-    print("\n--- Step 3: Depth scale estimation ---")
-    scale_cmd = f"python {CURR_PATH}/submodules/gaussian-splatting/utils/make_depth_scale.py --base_dir {source_p} --depths_dir {depths_p}"
+    # # Step 3: Estimate depth scale
+    # print("\n--- Step 3: Depth scale estimation ---")
+    # scale_cmd = f"python {CURR_PATH}/submodules/gaussian-splatting/utils/make_depth_scale.py --base_dir {source_p} --depths_dir {depths_p}"
     
-    if not run_command(scale_cmd, "Failed during depth scale estimation"):
-        return False
+    # if not run_command(scale_cmd, "Failed during depth scale estimation"):
+    #     return False
     
     depth_time = time.time()
     
     # Step 4: Train 3D Gaussian Splatting
     print("\n--- Step 4: 3D Gaussian Splatting training ---")
     train_cmd = (
-        "conda run -n gsplat CUDA_VISIBLE_DEVICES=0 python /v2gs/submodules/gsplat/examples/simple_trainer.py mcmc"
+        "conda run -n gsplat --no-capture-output CUDA_VISIBLE_DEVICES=0 python /v2gs/submodules/gsplat/examples/simple_trainer.py mcmc"
         f" --data_dir {source_p}  --data_factor 1 --result_dir {model_p}"
         f" --save-ply --pose-opt --depth-loss --disable-viewer --visible-adam --app-opt --use-bilateral-grid"
     )
