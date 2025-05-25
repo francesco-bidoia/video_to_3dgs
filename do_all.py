@@ -70,6 +70,7 @@ def run_command(command, error_message):
         return False
     return True
 
+
 def do_one(source_p, n_frames, clean=False, minimal=False, full=False):
     """
     Process a single video through the entire pipeline.
@@ -141,7 +142,7 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False):
     
     # Step 3: Estimate depth scale
     print("\n--- Step 3: Depth scale estimation ---")
-    scale_cmd = f"conda run -n gaussian_splatting python {CURR_PATH}/submodules/gaussian-splatting/utils/make_depth_scale.py --base_dir {source_p} --depths_dir {depths_p}"
+    scale_cmd = f"python {CURR_PATH}/submodules/gaussian-splatting/utils/make_depth_scale.py --base_dir {source_p} --depths_dir {depths_p}"
     
     if not run_command(scale_cmd, "Failed during depth scale estimation"):
         return False
@@ -151,16 +152,12 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False):
     # Step 4: Train 3D Gaussian Splatting
     print("\n--- Step 4: 3D Gaussian Splatting training ---")
     train_cmd = (
-        f"conda run -n gaussian_splatting python {CURR_PATH}/submodules/gaussian-splatting/train.py "
-        f"-s {source_p} -m {model_p} -d {depths_p} "
-        "--exposure_lr_init 0.001 --exposure_lr_final 0.0001 --exposure_lr_delay_steps 5000 "
-        "--exposure_lr_delay_mult 0.001 --train_test_exp --data_device cpu "
-        "--optimizer_type sparse_adam --antialiasing"
+        "conda run -n gsplat CUDA_VISIBLE_DEVICES=0 python /v2gs/submodules/gsplat/examples/simple_trainer.py mcmc"
+        f" --data_dir {source_p}  --data_factor 1 --result_dir {model_p}"
+        f" --save-ply --pose-opt --depth-loss --disable-viewer --visible-adam --app-opt --use-bilateral-grid"
     )
-    
-    if not full:
-        train_cmd += " --iterations 7000"
-    
+
+
     if not run_command(train_cmd, "Failed during 3D Gaussian Splatting training"):
         return False
     

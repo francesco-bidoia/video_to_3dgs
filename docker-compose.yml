@@ -4,9 +4,9 @@ services:
     stdin_open: true
     tty: true
     build: .
-    image: v2gs:cuda-11.8-1.0
+    image: v2gs:cuda-12.4-1.0
     network_mode: "host"
-    shm_size: 32gb
+    shm_size: 8gb
     environment:
       - DISPLAY=:0
       - MESA_GL_VERSION_OVERRIDE=4.5 # Needed for running viewers
@@ -22,6 +22,9 @@ services:
       - type: bind
         source: ${DATASET_GS_PATH:-../datasets_gs}
         target: /v2gs/datasets_gs
+      - type: bind
+        source: ../torch_cache
+        target: /root/.cache
     deploy:
       resources:
         reservations:

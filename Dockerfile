@@ -5,7 +5,7 @@
 ## https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/
 
 # Use the base image with PyTorch and CUDA support
-FROM pytorch/pytorch:2.1.2-cuda11.8-cudnn8-devel
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
 
 # NOTE:
 # Building the libraries for this repository requires cuda *DURING BUILD PHASE*, therefore:
@@ -21,19 +21,12 @@ RUN conda install -n base conda-libmamba-solver && \
     conda config --set solver libmamba && \
     conda init bash && exec bash
 
-
-COPY submodules/gaussian-splatting/environment.yml /tmp/environment.yml
-COPY  submodules/gaussian-splatting/submodules /tmp/submodules
-WORKDIR /tmp/
-RUN conda env create --file environment.yml
-
-RUN conda init bash && exec bash && conda activate gaussian_splatting
-
 RUN pip install pycolmap==3.11.1 open3d==0.19.0
 
 # Install colmap
 RUN apt update && apt-get install -y \
     git \
+    ffmpeg \
     cmake \
     ninja-build \
     build-essential \
@@ -67,23 +60,25 @@ RUN git checkout 682ea9ac4020a143047758739259b3ff04dabe8d &&\
     ninja &&\
     ninja install
 
-
-# Update submodule for faster training of 3dgs
-WORKDIR /tmp/submodules
-RUN rm -rf diff-gaussian-rasterization
-RUN git clone https://github.com/graphdeco-inria/diff-gaussian-rasterization.git --recursive
-WORKDIR /tmp/submodules/diff-gaussian-rasterization
-RUN git checkout 3dgs_accel
-RUN conda run -n gaussian_splatting python -m pip uninstall diff-gaussian-rasterization -y
-RUN conda run -n gaussian_splatting python -m pip install .
-
-
 # Install DepthAnything dependencies
 COPY ./submodules/DepthAnythingV2_docker/requirements.txt /tmp/requirements.txt
 WORKDIR /tmp/
 
 RUN pip install -r requirements.txt
 RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
+
+# Install gsplat
+COPY ./environment_gsplat.yml ./environment_gsplat.yml
+RUN conda env create --file environment_gsplat.yml
+
+RUN conda run -n gsplat python -m pip install ninja numpy jaxtyping rich fsspec
+COPY ./requirements_gsplat.txt ./requirements_gsplat.txt
+RUN conda run -n gsplat python -m pip install -r ./requirements_gsplat.txt
+
+RUN conda run -n gsplat python -m pip install gsplat --index-url https://docs.gsplat.studio/whl/pt24cu124
+
+COPY ./submodules/gsplat/examples/requirements.txt ./requirements.txt
+RUN conda run -n gsplat python -m pip install -r ./requirements.txt
 
 WORKDIR /v2gs
 

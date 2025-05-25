@@ -1,0 +1,10 @@
+name: gsplat
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - tqdm
+  - numpy<2.0.0
