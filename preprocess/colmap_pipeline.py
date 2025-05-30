@@ -539,7 +539,7 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, averag
     files_n = os.listdir(source_path)
     video_n = None
     for f in files_n:
-        if f.split(".")[-1] in ["mp4", "MP4"]:
+        if f.lower().endswith(('.mp4', '.mov', '.avi')):
             video_n = f
             break
 
@@ -682,7 +682,7 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
     files_n = os.listdir(source_path)
     video_n = None
     for f in files_n:
-        if f.split(".")[-1] in ["mp4", "MP4"]:
+        if f.lower().endswith(('.mp4', '.mov', '.avi')):
             video_n = f
             break
 
