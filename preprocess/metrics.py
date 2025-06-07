@@ -7,7 +7,7 @@ import numpy as np
 
 def sort_cameras_by_filename(reconstruction):
     """
-    Sort cameras in the reconstruction by their filename.
+    Sort images in the reconstruction by their filename and return their IDs.
     
     Parameters:
         reconstruction: A reconstruction object with an 'images' attribute.
