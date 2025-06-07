@@ -78,10 +78,15 @@ def compute_overlaps_in_rec(rec):
         'peak_pairs' contains image ID pairs that are below a threshold.
     """
     sorted_image_ids = sort_cameras_by_filename(rec)
-    imgs = [rec.images[i] for i in rec.images]
-    overl = [overlap_between_two_images(imgs[i], imgs[i+1]) for i in range(len(imgs)-1)]
+    imgs = [rec.images[i] for i in sorted_image_ids]
+    overl = [overlap_between_two_images(imgs[i], imgs[i+1])
+             for i in range(len(imgs)-1)]
     threshold = np.percentile(overl, 40)
-    peak_pairs = [(sorted_image_ids[i], sorted_image_ids[i+1]) for i in range(len(overl)) if overl[i] <= threshold]
+    peak_pairs = [
+        (sorted_image_ids[i], sorted_image_ids[i+1])
+        for i in range(len(overl))
+        if overl[i] <= threshold
+    ]
     return overl, peak_pairs
 
 
