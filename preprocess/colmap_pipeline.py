@@ -29,7 +29,7 @@ def extract_features(db_path, image_path, image_list):
         img_list_path = os.path.join(base_path, "image_list.txt")
         with open(img_list_path, "w") as f:
             f.writelines('\n'.join(image_list))
-        feat_extracton_cmd = (
+        feat_extraction_cmd = (
             "colmap feature_extractor "
             "--database_path " + db_path +
             " --image_path " + image_path +
@@ -40,7 +40,7 @@ def extract_features(db_path, image_path, image_list):
             " --SiftExtraction.use_gpu " + str(True)
         )
     else:
-        feat_extracton_cmd = (
+        feat_extraction_cmd = (
             "colmap feature_extractor "
             "--database_path " + db_path +
             " --image_path " + image_path +
@@ -50,7 +50,7 @@ def extract_features(db_path, image_path, image_list):
             " --SiftExtraction.use_gpu " + str(True)
         )
 
-    exit_code = os.system(feat_extracton_cmd)
+    exit_code = os.system(feat_extraction_cmd)
     if exit_code != 0:
         logging.error(f"Feature extraction failed with code {exit_code}. Exiting.")
         exit(exit_code)
