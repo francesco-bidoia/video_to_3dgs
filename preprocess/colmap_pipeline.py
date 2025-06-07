@@ -485,7 +485,7 @@ def filter_rec(rec_orig, img_path):
     thr_ratio = np.percentile(ratio_2d3d, 10)
 
     # Remove images that do not meet the 2D and 3D point criteria.
-    to_remove = np.where((((n_points2d > thr_views) * (ratio_2d3d > thr_ratio)) * 1) == 0)[0]
+    to_remove = np.where(((n_points2d > thr_2dviews) * (ratio_2d3d > thr_ratio)) == 0)[0]
     to_remove_ids = ids[to_remove]
     [rec.deregister_image(i) for i in to_remove_ids]
     for i in to_remove_ids:
