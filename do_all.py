@@ -71,7 +71,7 @@ def run_command(command, error_message):
     return True
 
 
-def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=False):
+def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=False, images_path=None):
     """
     Process a single video through the entire pipeline.
     
@@ -88,17 +88,22 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=
     """
     start_time = time.time()
     
-    # Find video file in the source directory
+    # Find video file in the source directory unless images are provided directly
+    if images_path and not os.path.isdir(images_path):
+        print(f"Error: Image path {images_path} does not exist")
+        return False
+
     files_n = os.listdir(source_p)
     video_n = None
-    for f in files_n:
-        if f.lower().endswith(('.mp4', '.mov', '.avi')):
-            video_n = f
-            break
-    
-    if video_n is None and "input" not in files_n:
-        print(f"Error: No video file found in {source_p}")
-        return False
+    if images_path is None:
+        for f in files_n:
+            if f.lower().endswith(('.mp4', '.mov', '.avi')):
+                video_n = f
+                break
+
+        if video_n is None and "input" not in files_n:
+            print(f"Error: No video file found in {source_p}")
+            return False
     
     # Define output directories
     images_p = os.path.join(source_p, 'images')
@@ -114,12 +119,16 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=
         duration, frame_count, fps = get_video_length(video_path)
         if duration:
             print(f"Video duration: {duration}s, {frame_count} frames, {fps} FPS")
+    elif images_path:
+        print(f"Using images from: {images_path}")
     print(f"{'='*80}\n")
-    
+
     # Step 1: Extract frames and perform SfM
     if not (os.path.isdir(images_p) and os.path.isdir(sparse_p)) or clean:
         print("\n--- Step 1: Frame extraction and Structure from Motion ---")
         sfm_command = f"python preprocess/main_video_process.py -s {source_p} -n {n_frames} --robust"
+        if images_path:
+            sfm_command += f' --images_path "{images_path}"'
         
         if clean:
             sfm_command += " -c"
@@ -191,14 +200,18 @@ def main(args):
     minimal = args.minimal
     full = args.full
     full_res = args.full_res
-    
+    images_path = args.images_path
+
+    if images_path:
+        images_path = os.path.abspath(images_path)
+
     if not os.path.exists(source_p):
         print(f"Error: Source path {source_p} does not exist")
         return
-    
+
     if not args.all:
         # Process a single video
-        do_one(source_p, n_frames, clean=clean, minimal=minimal, full=full, full_res=full_res)
+        do_one(source_p, n_frames, clean=clean, minimal=minimal, full=full, full_res=full_res, images_path=images_path)
     else:
         # Process all subdirectories
         print(f"Processing all subdirectories in {source_p}")
@@ -212,7 +225,7 @@ def main(args):
                 continue
                 
             print(f"\nProcessing directory: {d}")
-            result = do_one(tmp, n_frames, clean=clean, minimal=minimal, full=full, full_res=full_res)
+            result = do_one(tmp, n_frames, clean=clean, minimal=minimal, full=full, full_res=full_res, images_path=images_path)
             
             if result:
                 successful += 1
@@ -237,6 +250,8 @@ if __name__ == '__main__':
                         help="Extract final frames at full resolution")
     parser.add_argument("--all", "-a", action='store_true',
                         help="Process all subdirectories in the source path")
+    parser.add_argument("--images_path", type=str, default=None,
+                        help="Path to a directory containing pre-extracted images")
     
     args = parser.parse_args()
     main(args)

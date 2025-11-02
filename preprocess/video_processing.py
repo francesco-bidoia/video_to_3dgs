@@ -6,7 +6,8 @@ Contains functionality for video metadata extraction and frame extraction.
 import subprocess
 import os
 import json
-from typing import List, Optional
+import shutil
+from typing import Dict, List, Optional
 
 class FFmpegWrapper:
     """
@@ -147,4 +148,130 @@ class FFmpegWrapper:
         for p1, p2 in peak_pairs:
             if p1 in self.frames and p2 in self.frames:
                 selected_frames.extend(self.get_list_of_n_frames(n, start_frame=p1, end_frame=p2))
+        return selected_frames
+
+
+class ImageFolderWrapper:
+    """Utility that mimics :class:`FFmpegWrapper` for pre-extracted image sequences."""
+
+    _VALID_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
+
+    def __init__(self, images_path: str, output_dir: str):
+        self.images_path = images_path
+        self.output_dir = output_dir
+        self.tmp_path = os.path.join(os.path.dirname(output_dir), "tmp")
+        os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.tmp_path, exist_ok=True)
+
+        self.index_to_source: Dict[int, str] = {}
+        self.index_to_tmp: Dict[int, str] = {}
+        self.frames: List[str] = []
+
+        self._prepare_frames()
+        self.duration = len(self.frames)
+        self.fps = None
+        self.width = None
+        self.height = None
+
+    def _prepare_frames(self) -> None:
+        existing = set(os.listdir(self.tmp_path))
+        if existing:
+            for name in sorted(existing):
+                try:
+                    idx = int(os.path.splitext(name)[0])
+                except ValueError:
+                    continue
+                self.frames.append(name)
+                self.index_to_tmp[idx] = name
+            if self.frames:
+                self.index_to_source = {
+                    idx: os.path.join(self.images_path, self.index_to_tmp[idx])
+                    for idx in self.index_to_tmp
+                    if os.path.exists(os.path.join(self.images_path, self.index_to_tmp[idx]))
+                }
+                self.frames.sort()
+                return
+
+        shutil.rmtree(self.tmp_path)
+        os.makedirs(self.tmp_path, exist_ok=True)
+
+        images = [
+            f for f in sorted(os.listdir(self.images_path))
+            if f.lower().endswith(self._VALID_EXT)
+        ]
+
+        if not images:
+            raise FileNotFoundError(f"No images found in {self.images_path}")
+
+        for idx, name in enumerate(images):
+            src = os.path.join(self.images_path, name)
+            ext = os.path.splitext(name)[1].lower() or ".jpg"
+            tmp_name = f"{idx:08d}{ext}"
+            dst = os.path.join(self.tmp_path, tmp_name)
+            shutil.copy2(src, dst)
+            self.frames.append(tmp_name)
+            self.index_to_source[idx] = src
+            self.index_to_tmp[idx] = tmp_name
+
+    def _frame_name(self, ind: int) -> Optional[str]:
+        if ind in self.index_to_tmp:
+            return self.index_to_tmp[ind]
+        name = f"{ind:08d}"
+        for candidate in self.frames:
+            if candidate.startswith(name):
+                self.index_to_tmp[ind] = candidate
+                return candidate
+        return None
+
+    def get_list_of_n_frames(self, n: int, start_frame: Optional[str] = None, end_frame: Optional[str] = None) -> List[str]:
+        if not self.frames or n <= 0:
+            return []
+
+        start_idx = self.frames.index(start_frame) if start_frame in self.frames else 0
+        end_idx = self.frames.index(end_frame) if end_frame in self.frames else len(self.frames) - 1
+
+        valid_frames = self.frames[start_idx:end_idx+1]
+        total_frames = len(valid_frames)
+
+        if n >= total_frames:
+            return [os.path.join(self.tmp_path, frame) for frame in valid_frames]
+
+        step = total_frames / n
+        indices = sorted(set(round(i * step) for i in range(n)))
+        selected_frames = [valid_frames[i] for i in indices if i < total_frames]
+        return [os.path.join(self.tmp_path, frame) for frame in selected_frames]
+
+    def extract_specific_frames(self, frame_indices: List[int], full_res: bool = False) -> None:
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        for ind in frame_indices:
+            src = self.index_to_source.get(ind)
+            if src is None:
+                frame_name = self._frame_name(ind)
+                if frame_name is None:
+                    continue
+                candidate = os.path.join(self.images_path, frame_name)
+                if os.path.exists(candidate):
+                    src = candidate
+            if src is None:
+                continue
+            ext = os.path.splitext(src)[1] or ".jpg"
+            dst = os.path.join(self.output_dir, f"{ind:08d}{ext}")
+            shutil.copy2(src, dst)
+
+    def ind_to_frame_name(self, ind: int) -> str:
+        frame = self._frame_name(ind)
+        if frame is None:
+            frame = f"{ind:08d}.jpg"
+        return os.path.join(self.tmp_path, frame)
+
+    def get_frames_between_pairs(self, peak_pairs: List[tuple], n: int) -> List[str]:
+        selected_frames: List[str] = []
+        for p1, p2 in peak_pairs:
+            frame1 = self._frame_name(p1) if isinstance(p1, int) else p1
+            frame2 = self._frame_name(p2) if isinstance(p2, int) else p2
+            if frame1 in self.frames and frame2 in self.frames:
+                selected_frames.extend(
+                    self.get_list_of_n_frames(n, start_frame=frame1, end_frame=frame2)
+                )
         return selected_frames

@@ -18,7 +18,8 @@ def main(args):
     clean = args.clean
     full = args.full
     full_res = args.full_res
-    
+    images_path = args.images_path
+
     if args.robust:
         print("Using robust reconstruction pipeline...")
         # Pass additional parameters to the robust pipeline
@@ -29,6 +30,7 @@ def main(args):
             minimal=args.minimal,
             full=full,
             full_res=full_res,
+            images_path=images_path,
             random_ratio=args.random_ratio,
             pruning_threshold=args.pruning_threshold,
             coverage_weight=args.coverage_weight,
@@ -38,7 +40,7 @@ def main(args):
         )
     else:
         print("Using standard reconstruction pipeline...")
-        do_one(source_path, n_images, clean, minimal=args.minimal, full=full, full_res=full_res)
+        do_one(source_path, n_images, clean, minimal=args.minimal, full=full, full_res=full_res, images_path=images_path)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="COLMAP reconstruction pipeline for video processing")
@@ -56,6 +58,8 @@ if __name__ == '__main__':
                         help="Extract final frames at full resolution")
     parser.add_argument("--robust", "-r", action='store_true',
                         help="Use robust reconstruction pipeline with pose interpolation")
+    parser.add_argument("--images_path", type=str, default=None,
+                        help="Optional path to a directory containing pre-extracted images")
     
     # Additional parameters for the robust pipeline
     parser.add_argument("--random_ratio", type=float, default=0.2,
