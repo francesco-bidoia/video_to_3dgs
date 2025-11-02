@@ -106,7 +106,7 @@ def make_folders(source_path):
     os.makedirs(sparse_path, exist_ok=True)
     os.makedirs(distorted_sparse_final_path, exist_ok=True)
 
-def clean_paths(source_path, video_n, db_path):
+def clean_paths(source_path, video_n, db_path, extra_keep=None):
     """
     Clean the source directory by removing temporary and unwanted folders.
     
@@ -118,10 +118,12 @@ def clean_paths(source_path, video_n, db_path):
     if os.path.isfile(db_path):
         os.remove(db_path)
     all_files = os.listdir(source_path)
-    if video_n in all_files:
-        all_files.remove(video_n)
-    if "tmp" in all_files:
-        all_files.remove("tmp")
+    keep = set(extra_keep or [])
+    if video_n:
+        keep.add(video_n)
+    keep.add("tmp")
+
+    all_files = [f for f in all_files if f not in keep]
     print(f"Clean start. removing:\n{all_files}")
     paths = [os.path.join(source_path, tmp) for tmp in all_files]
     [shutil.rmtree(tmp) for tmp in paths if os.path.isdir(tmp)]

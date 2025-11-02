@@ -12,6 +12,119 @@ import logging
 import pycolmap
 from typing import Dict, List, Tuple, Set, Optional
 
+
+class ImageFolderWrapper:
+    """Lightweight wrapper that mimics :class:`FFmpegWrapper` for image folders."""
+
+    def __init__(self, source_path: str, image_dir: str, output_dir: str):
+        self.source_path = source_path
+        self.image_dir = image_dir
+        self.output_dir = output_dir
+        self.tmp_path = os.path.join(source_path, "tmp")
+        os.makedirs(self.tmp_path, exist_ok=True)
+        self._prepare_tmp_frames()
+
+    def _prepare_tmp_frames(self):
+        supported_ext = {".jpg", ".jpeg", ".png"}
+        if not os.path.isdir(self.image_dir):
+            raise FileNotFoundError(f"Image directory {self.image_dir} does not exist")
+
+        images = [
+            f for f in os.listdir(self.image_dir)
+            if os.path.splitext(f)[1].lower() in supported_ext
+            and os.path.isfile(os.path.join(self.image_dir, f))
+        ]
+        images.sort()
+
+        if not images:
+            raise RuntimeError(f"No images with extensions {supported_ext} found in {self.image_dir}")
+
+        # Clean previous temporary frames
+        for item in os.listdir(self.tmp_path):
+            tmp_item = os.path.join(self.tmp_path, item)
+            if os.path.isdir(tmp_item):
+                shutil.rmtree(tmp_item)
+            else:
+                os.unlink(tmp_item)
+
+        self.frames = []
+        self.index_to_name = {}
+        for index, filename in enumerate(images, start=1):
+            ext = os.path.splitext(filename)[1].lower()
+            new_name = f"{index:08d}{ext}"
+            src = os.path.join(self.image_dir, filename)
+            dst = os.path.join(self.tmp_path, new_name)
+            if os.path.exists(dst):
+                os.remove(dst)
+            try:
+                os.symlink(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
+            self.frames.append(new_name)
+            self.index_to_name[index] = new_name
+
+        self.duration = float(len(self.frames))
+
+    def get_list_of_n_frames(self, n: int, start_frame=None, end_frame=None) -> List[str]:
+        if not self.frames or n <= 0:
+            return []
+
+        def _normalize(frame):
+            if frame is None:
+                return None
+            if isinstance(frame, int):
+                return self.index_to_name.get(frame)
+            return frame
+
+        start_frame = _normalize(start_frame)
+        end_frame = _normalize(end_frame)
+
+        start_idx = self.frames.index(start_frame) if start_frame in self.frames else 0
+        end_idx = self.frames.index(end_frame) if end_frame in self.frames else len(self.frames) - 1
+
+        valid_frames = self.frames[start_idx:end_idx + 1]
+        total_frames = len(valid_frames)
+
+        if n >= total_frames:
+            return [os.path.join(self.tmp_path, frame) for frame in valid_frames]
+
+        step = total_frames / n
+        indices = sorted(set(round(i * step) for i in range(n)))
+        selected_frames = [valid_frames[i] for i in indices if i < total_frames]
+        return [os.path.join(self.tmp_path, frame) for frame in selected_frames]
+
+    def extract_specific_frames(self, frame_indices, full_res=False):
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # Remove existing extracted frames to avoid stale images
+        for item in os.listdir(self.output_dir):
+            item_path = os.path.join(self.output_dir, item)
+            if os.path.isfile(item_path) or os.path.islink(item_path):
+                os.remove(item_path)
+
+        for idx in frame_indices:
+            try:
+                frame_index = int(idx)
+            except (ValueError, TypeError):
+                continue
+            name = self.index_to_name.get(frame_index)
+            if not name:
+                continue
+            src = os.path.join(self.tmp_path, name)
+            if not os.path.exists(src):
+                continue
+            dst = os.path.join(self.output_dir, name)
+            if os.path.exists(dst):
+                os.remove(dst)
+            shutil.copy2(src, dst)
+
+    def ind_to_frame_name(self, ind: int) -> str:
+        frame_index = int(ind)
+        name = self.index_to_name.get(frame_index)
+        if not name:
+            name = f"{frame_index:08d}.jpeg"
+        return os.path.join(self.tmp_path, name)
+
 from utils import _name_to_ind, make_folders, clean_paths
 from metrics import compute_overlaps_in_rec, sort_cameras_by_filename, overlap_between_two_images
 
@@ -183,7 +296,7 @@ def reconstruct(source_path, db_path, image_path, output_path, image_list, exist
     return rec, image_list, reconstructions
 
 
-def iterative_reconstruc(source_path, db_path, image_path, output_path, image_list, fmw, video_n, max_iter=15):
+def iterative_reconstruc(source_path, db_path, image_path, output_path, image_list, fmw, video_n, max_iter=15, extra_keep=None):
     """
     Iteratively attempt reconstruction by gradually increasing the number of frames.
     
@@ -209,7 +322,7 @@ def iterative_reconstruc(source_path, db_path, image_path, output_path, image_li
     # increase until we get at least 50% ratio of reconstructed images 
 
     while rec is None and itr < max_iter:
-        clean_paths(source_path, video_n, db_path)
+        clean_paths(source_path, video_n, db_path, extra_keep=extra_keep)
         make_folders(source_path)
 
         # Check percentage reconstructed
@@ -523,19 +636,43 @@ def interpolate_all_frames(rec, fmw):
     
     return all_poses
 
-def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_res=False, average_overlap=100):
+def _compute_extra_keep(source_path: str, image_input: Optional[str]) -> List[str]:
+    if not image_input:
+        return []
+
+    extra_keep = []
+    abs_source = os.path.abspath(source_path)
+    abs_images = os.path.abspath(image_input)
+
+    try:
+        common = os.path.commonpath([abs_source, abs_images])
+    except ValueError:
+        return []
+
+    if common == abs_source:
+        rel = os.path.relpath(abs_images, abs_source)
+        if rel != os.curdir:
+            top_level = rel.split(os.sep)[0]
+            extra_keep.append(top_level)
+
+    return extra_keep
+
+
+def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_res=False, average_overlap=100, image_input=None):
     """
-    Main pipeline function to process a video, perform reconstruction,
+    Main pipeline function to process an input sequence, perform reconstruction,
     and generate undistorted outputs.
-    
+
     Parameters:
-        source_path (str): Base directory containing video and images.
+        source_path (str): Base directory containing the dataset.
         n_images (int): Target number of images for reconstruction.
         clean (bool, optional): Flag to clean existing paths before processing.
         minimal (bool, optional): Use minimal frame selection after final reconstruction.
         full (bool, optional): Use all frame selection after final reconstruction.
         full_res (bool, optional): Extract final frames at full resolution.
         average_overlap (int, optional): Target average overlap between frames.
+        image_input (str, optional): Path to a directory of input images. When provided,
+            frame extraction from video is skipped and the images are used directly.
     """
     files_n = os.listdir(source_path)
     video_n = None
@@ -544,22 +681,28 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_r
             video_n = f
             break
 
-    if video_n is None and (not ("input" in files_n)):
-        exit(1)
+    if video_n is None and image_input is None and ("input" not in files_n):
+        raise RuntimeError("No video file found and no image input provided.")
 
-    video_p = os.path.join(source_path, video_n)
     input_p = os.path.join(source_path, 'input')
     distorted_path = os.path.join(source_path, "distorted")
     distorted_sparse_path = os.path.join(distorted_path, "sparse")
     distorted_sparse_final_path = os.path.join(distorted_path, "sparse_final")
     sparse_path = os.path.join(source_path, "sparse/0")
     db_path = os.path.join(distorted_path, "database.db")
+    extra_keep = _compute_extra_keep(source_path, image_input)
+
     if clean:
-        clean_paths(source_path, video_n, db_path)
+        clean_paths(source_path, video_n, db_path, extra_keep=extra_keep)
     make_folders(source_path)
 
-    from video_processing import FFmpegWrapper
-    fmw = FFmpegWrapper(video_p, input_p)
+    if image_input:
+        fmw = ImageFolderWrapper(source_path, image_input, input_p)
+        video_p = None
+    else:
+        from video_processing import FFmpegWrapper
+        video_p = os.path.join(source_path, video_n)
+        fmw = FFmpegWrapper(video_p, input_p)
 
     n_frames = int(fmw.duration)
     frames_list = fmw.get_list_of_n_frames(n_frames)
@@ -569,7 +712,16 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_r
         rec = pycolmap.Reconstruction(os.path.join(distorted_path, "orig_distorted"))
         frames_list = [os.path.join(fmw.tmp_path, rec.images[i].name) for i in rec.images]
     else:
-        rec, frames_list = iterative_reconstruc(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, fmw, video_n)
+        rec, frames_list = iterative_reconstruc(
+            source_path,
+            db_path,
+            fmw.tmp_path,
+            distorted_sparse_path,
+            frames_list,
+            fmw,
+            video_n,
+            extra_keep=extra_keep,
+        )
         rec.write_binary(distorted_sparse_path)
         shutil.copytree(distorted_sparse_path, os.path.join(os.path.dirname(distorted_sparse_path), "orig_distorted"))
     
@@ -660,9 +812,9 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_r
 
 def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False, full_res=False, average_overlap=100,
                  random_ratio=0.2, pruning_threshold=0.05, coverage_weight=0.4, triangulation_weight=0.3,
-                 diversity_weight=0.2, confidence_weight=0.1):
+                 diversity_weight=0.2, confidence_weight=0.1, image_input=None):
     """
-    Enhanced pipeline function to process a video, perform reconstruction with robust frame selection,
+    Enhanced pipeline function to process an input sequence, perform reconstruction with robust frame selection,
     and generate undistorted outputs. This version uses camera pose interpolation to make better
     decisions about which frames to include.
     
@@ -680,6 +832,8 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
         triangulation_weight (float, optional): Weight for triangulation score in frame selection.
         diversity_weight (float, optional): Weight for diversity score in frame selection.
         confidence_weight (float, optional): Weight for confidence score in frame selection.
+        image_input (str, optional): Path to a directory of input images. When provided,
+            frame extraction from video is skipped and the images are used directly.
     """
     files_n = os.listdir(source_path)
     video_n = None
@@ -688,23 +842,29 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
             video_n = f
             break
 
-    if video_n is None and (not ("input" in files_n)):
-        exit(1)
+    if video_n is None and image_input is None and ("input" not in files_n):
+        raise RuntimeError("No video file found and no image input provided.")
 
-    video_p = os.path.join(source_path, video_n)
     input_p = os.path.join(source_path, 'input')
     distorted_path = os.path.join(source_path, "distorted")
     distorted_sparse_path = os.path.join(distorted_path, "sparse")
     distorted_sparse_final_path = os.path.join(distorted_path, "sparse_final")
     sparse_path = os.path.join(source_path, "sparse/0")
     db_path = os.path.join(distorted_path, "database.db")
-    
+
+    extra_keep = _compute_extra_keep(source_path, image_input)
+
     if clean:
-        clean_paths(source_path, video_n, db_path)
+        clean_paths(source_path, video_n, db_path, extra_keep=extra_keep)
     make_folders(source_path)
 
-    from video_processing import FFmpegWrapper
-    fmw = FFmpegWrapper(video_p, input_p)
+    if image_input:
+        fmw = ImageFolderWrapper(source_path, image_input, input_p)
+        video_p = None
+    else:
+        from video_processing import FFmpegWrapper
+        video_p = os.path.join(source_path, video_n)
+        fmw = FFmpegWrapper(video_p, input_p)
 
     n_frames = int(fmw.duration)
     frames_list = fmw.get_list_of_n_frames(n_frames)
@@ -715,7 +875,16 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
         rec = pycolmap.Reconstruction(os.path.join(distorted_path, "orig_distorted"))
         frames_list = [os.path.join(fmw.tmp_path, rec.images[i].name) for i in rec.images]
     else:
-        rec, frames_list = iterative_reconstruc(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, fmw, video_n)
+        rec, frames_list = iterative_reconstruc(
+            source_path,
+            db_path,
+            fmw.tmp_path,
+            distorted_sparse_path,
+            frames_list,
+            fmw,
+            video_n,
+            extra_keep=extra_keep,
+        )
         rec.write_binary(distorted_sparse_path)
         shutil.copytree(distorted_sparse_path, os.path.join(os.path.dirname(distorted_sparse_path), "orig_distorted"))
     

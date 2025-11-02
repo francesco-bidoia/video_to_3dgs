@@ -17,6 +17,7 @@ import os
 import sys
 import shutil
 import time
+import shlex
 from argparse import ArgumentParser
 
 # Get the current script directory
@@ -71,7 +72,7 @@ def run_command(command, error_message):
     return True
 
 
-def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=False):
+def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=False, images_path=None):
     """
     Process a single video through the entire pipeline.
     
@@ -119,8 +120,11 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=
     # Step 1: Extract frames and perform SfM
     if not (os.path.isdir(images_p) and os.path.isdir(sparse_p)) or clean:
         print("\n--- Step 1: Frame extraction and Structure from Motion ---")
-        sfm_command = f"python preprocess/main_video_process.py -s {source_p} -n {n_frames} --robust"
-        
+        sfm_command = f"python preprocess/main_video_process.py -s {shlex.quote(source_p)} -n {n_frames} --robust"
+
+        if images_path:
+            sfm_command += f" --image_input {shlex.quote(images_path)}"
+
         if clean:
             sfm_command += " -c"
         if minimal:
@@ -191,28 +195,36 @@ def main(args):
     minimal = args.minimal
     full = args.full
     full_res = args.full_res
-    
+    images_path = args.images_path
+
     if not os.path.exists(source_p):
         print(f"Error: Source path {source_p} does not exist")
         return
-    
+
+    if images_path and not os.path.isdir(images_path):
+        print(f"Error: Image path {images_path} does not exist or is not a directory")
+        return
+
+    if args.all and images_path:
+        print("Warning: --images_path was provided together with --all. The same images folder will be used for each subdirectory.")
+
     if not args.all:
         # Process a single video
-        do_one(source_p, n_frames, clean=clean, minimal=minimal, full=full, full_res=full_res)
+        do_one(source_p, n_frames, clean=clean, minimal=minimal, full=full, full_res=full_res, images_path=images_path)
     else:
         # Process all subdirectories
         print(f"Processing all subdirectories in {source_p}")
         dirs = os.listdir(source_p)
         successful = 0
         failed = 0
-        
+
         for d in dirs:
             tmp = os.path.join(source_p, d)
             if not os.path.isdir(tmp):
                 continue
-                
+
             print(f"\nProcessing directory: {d}")
-            result = do_one(tmp, n_frames, clean=clean, minimal=minimal, full=full, full_res=full_res)
+            result = do_one(tmp, n_frames, clean=clean, minimal=minimal, full=full, full_res=full_res, images_path=images_path)
             
             if result:
                 successful += 1
@@ -237,6 +249,8 @@ if __name__ == '__main__':
                         help="Extract final frames at full resolution")
     parser.add_argument("--all", "-a", action='store_true',
                         help="Process all subdirectories in the source path")
+    parser.add_argument("--images_path", type=str, default=None,
+                        help="Optional path to a folder of images to use directly instead of extracting from a video")
     
     args = parser.parse_args()
     main(args)
