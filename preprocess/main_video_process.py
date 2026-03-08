@@ -43,7 +43,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="COLMAP reconstruction pipeline for video processing")
     parser.add_argument("--source_path", "-s", required=True, type=str,
-                        help="Path to the directory containing the video")
+                        help="Path to the scene directory containing either images/ or a video file")
     parser.add_argument("--number_of_frames", "-n", default=200, type=int,
                         help="Target number of frames for reconstruction (default: 200)")
     parser.add_argument("--clean", "-c", action='store_true',
