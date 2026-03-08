@@ -64,13 +64,22 @@ RUN git fetch && git checkout ada915d1fe8140fe6b873ce94d16fa772f805978 &&\
     ninja &&\
     ninja install
 
+WORKDIR /v2gs
+
+# OpenAI codex
+RUN apt-get update && apt-get install -y curl \
+ && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y nodejs \
+ && npm install -g @openai/codex
+
+
 
 # # Install DepthAnything dependencies
-# COPY ./submodules/DepthAnythingV2_docker/requirements.txt /tmp/requirements.txt
-# WORKDIR /tmp/
+COPY ./submodules/DepthAnythingV2_docker/requirements.txt /tmp/requirements.txt
+WORKDIR /tmp/
 
-# RUN pip install -r requirements.txt
-# RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
+RUN pip install -r requirements.txt
+RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
 
 # # Install gsplat
 # COPY ./environment_gsplat.yml ./environment_gsplat.yml
@@ -85,13 +94,8 @@ RUN git fetch && git checkout ada915d1fe8140fe6b873ce94d16fa772f805978 &&\
 # COPY ./submodules/gsplat/examples/requirements.txt ./requirements.txt
 # RUN conda run -n gsplat python -m pip install -r ./requirements.txt
 
-WORKDIR /v2gs
 
-# OpenAI codex
-RUN apt-get update && apt-get install -y curl \
- && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
- && apt-get install -y nodejs \
- && npm install -g @openai/codex
+WORKDIR /v2gs
 
 # This error occurs because there’s a conflict between the threading layer used
 # by Intel MKL (Math Kernel Library) and the libgomp library, 
