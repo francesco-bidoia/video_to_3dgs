@@ -94,37 +94,51 @@ def make_folders(source_path):
     Parameters:
         source_path (str): Base directory path.
     """
-    input_p = os.path.join(source_path, 'input')
-    distorted_path = os.path.join(source_path, "distorted")
-    distorted_sparse_path = os.path.join(distorted_path, "sparse")
-    distorted_sparse_final_path = os.path.join(distorted_path, "sparse_final")
     sparse_path = os.path.join(source_path, "sparse/0")
+    undistorted_path = os.path.join(source_path, "undistorted")
 
-    os.makedirs(input_p, exist_ok=True)
-    os.makedirs(distorted_path, exist_ok=True)
-    os.makedirs(distorted_sparse_path, exist_ok=True)
     os.makedirs(sparse_path, exist_ok=True)
-    os.makedirs(distorted_sparse_final_path, exist_ok=True)
+    os.makedirs(undistorted_path, exist_ok=True)
 
-def clean_paths(source_path, video_n, db_path):
+def clean_paths(source_path, video_n=None, db_path=None, remove_tmp=True):
     """
     Clean the source directory by removing temporary and unwanted folders.
     
     Parameters:
         source_path (str): Base directory path.
-        video_n (str): Video filename to be retained.
+        video_n (str): Unused legacy argument kept for backward compatibility.
         db_path (str): Path to the database file to be removed.
     """
-    if os.path.isfile(db_path):
+    if db_path and os.path.isfile(db_path):
         os.remove(db_path)
-    all_files = os.listdir(source_path)
-    if video_n in all_files:
-        all_files.remove(video_n)
-    if "tmp" in all_files:
-        all_files.remove("tmp")
-    print(f"Clean start. removing:\n{all_files}")
-    paths = [os.path.join(source_path, tmp) for tmp in all_files]
-    [shutil.rmtree(tmp) for tmp in paths if os.path.isdir(tmp)]
+
+    removable_files = [
+        os.path.join(source_path, "database.db"),
+        os.path.join(source_path, "database_final.db"),
+    ]
+    for fpath in removable_files:
+        if os.path.isfile(fpath):
+            os.remove(fpath)
+
+    removable_dirs = [
+        "sparse",
+        "undistorted",
+        "model",
+        "d_images",
+        "distorted",
+        "input",
+    ]
+    if remove_tmp:
+        removable_dirs.insert(0, "tmp")
+    removed = []
+    for dname in removable_dirs:
+        dpath = os.path.join(source_path, dname)
+        if os.path.isdir(dpath):
+            shutil.rmtree(dpath)
+            removed.append(dname)
+
+    if removed:
+        print(f"Clean start. removed generated folders: {removed}")
 
 def _name_to_ind(name):
     """

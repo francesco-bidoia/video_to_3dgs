@@ -1,15 +1,14 @@
-# Video to 3D Gaussian Splatting
+# Video/Image Folder to 3D Gaussian Splatting
 
-This repository provides an end-to-end pipeline for generating 3D Gaussian Splatting models from videos. It automates the process of frame extraction, Structure from Motion (SfM), depth estimation, and 3D Gaussian Splatting training.
+This repository provides an end-to-end pipeline for generating 3D Gaussian Splatting models from a scene folder. The scene can contain either a video file or an `images/` folder.
 
 ## Overview
 
-The pipeline consists of the following steps:
-1. Video frame extraction and selection
+The pipeline currently supports:
+1. Input detection from `source_path` (video or `images/`)
 2. Structure from Motion (SfM) using COLMAP
-3. Depth estimation using Depth Anything V2
-4. Depth scale estimation
-5. 3D Gaussian Splatting training
+3. Image undistortion to COLMAP format (`undistorted/`)
+4. 3D Gaussian Splatting training
 
 ## Installation
 
@@ -41,13 +40,23 @@ The pipeline consists of the following steps:
 
 ## Usage
 
-### Dataset Preparation
+### Scene Preparation
 
-1. Create a dataset directory:
+Create a scene directory in one of these two formats:
+
+1. Video input:
    ```
    datasets_gs/your_scene_name/your_video.mp4
    ```
-   The video file can have any name with a `.mp4` extension.
+
+2. Image-folder input:
+   ```
+   datasets_gs/your_scene_name/images/
+   ```
+   Put your source images directly in `images/`.
+
+Input priority rule:
+- If both a video and `images/` exist, the pipeline assumes the video was already processed and uses `images/`.
 
    By default, the pipeline looks for datasets in the `../datasets_gs` directory relative to the project root. You can specify a different location when starting the container:
    ```bash
@@ -56,13 +65,13 @@ The pipeline consists of the following steps:
 
 ### Running the Pipeline
 
-To process a single video:
+To process a single scene:
 ```bash
 python do_all.py -s /v2gs/datasets_gs/your_scene_name -n 300
 ```
 
 Parameters:
-- `-s, --source_path`: Path to the directory containing your video
+- `-s, --source_path`: Path to the scene directory (must contain either `images/` or a video file)
 - `-n, --max_number_of_frames`: Maximum number of frames to extract (default: 400)
 - `-c, --clean`: Clean existing processed data and start fresh
 - `-m, --minimal`: Use minimal frame selection after final reconstruction
@@ -70,13 +79,19 @@ Parameters:
 - `--full_res`: Extract final frames at full resolution
 - `-a, --all`: Process all subdirectories in the source path
 
+Resume behavior:
+- The pipeline checks existing outputs and continues from what is already available.
+- If `undistorted/` already exists and is complete, undistortion is skipped.
+- `--clean` removes generated artifacts (`tmp/`, `sparse/`, `undistorted/`, DB files, model outputs) and keeps raw scene inputs.
+
 ### Output
 
-The pipeline generates the following directories:
-- `images/`: Extracted video frames
-- `sparse/`: COLMAP sparse reconstruction
-- `d_images/`: Depth maps estimated by Depth Anything V2
-- `model/`: Trained 3D Gaussian Splatting model
+The pipeline generates these key artifacts under `source_path`:
+- `images/`: input image set (pre-existing or extracted from video)
+- `database.db` and `database_final.db`: COLMAP databases
+- `sparse/0/`: final sparse reconstruction
+- `undistorted/images/` and `undistorted/sparse/0/`: output of `colmap image_undistorter`
+- `model/`: trained 3D Gaussian Splatting model
 
 ## Viewing Results
 

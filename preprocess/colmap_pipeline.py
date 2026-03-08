@@ -15,6 +15,62 @@ from typing import Dict, List, Tuple, Set, Optional
 from utils import _name_to_ind, make_folders, clean_paths
 from metrics import compute_overlaps_in_rec, sort_cameras_by_filename, overlap_between_two_images
 
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v")
+_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
+
+
+def _find_video_file(source_path: str) -> Optional[str]:
+    for name in sorted(os.listdir(source_path)):
+        if name.lower().endswith(_VIDEO_EXTENSIONS):
+            return name
+    return None
+
+
+def _has_images(images_path: str) -> bool:
+    if not os.path.isdir(images_path):
+        return False
+    for name in os.listdir(images_path):
+        if name.lower().endswith(_IMAGE_EXTENSIONS):
+            return True
+    return False
+
+
+def _detect_scene_mode(source_path: str) -> Tuple[str, str, Optional[str]]:
+    images_p = os.path.join(source_path, "images")
+    has_images = _has_images(images_p)
+    video_n = _find_video_file(source_path)
+
+    if has_images:
+        if video_n:
+            print("Detected both video and images/. Assuming video already processed and using images/.")
+        return "images", images_p, video_n
+
+    if video_n:
+        return "video", images_p, video_n
+
+    raise FileNotFoundError(
+        f"Could not detect scene input in {source_path}. Expected either images/ with images or a video file at root."
+    )
+
+
+def _undistorted_ready(source_path: str) -> bool:
+    undistorted_images = os.path.join(source_path, "undistorted", "images")
+    undistorted_sparse = os.path.join(source_path, "undistorted", "sparse", "0", "images.bin")
+    return os.path.isdir(undistorted_images) and os.path.isfile(undistorted_sparse)
+
+
+def _normalize_sparse_layout(base_path: str) -> None:
+    sparse_dir = os.path.join(base_path, "sparse")
+    if not os.path.isdir(sparse_dir):
+        return
+    os.makedirs(os.path.join(sparse_dir, "0"), exist_ok=True)
+    for name in os.listdir(sparse_dir):
+        if name == "0":
+            continue
+        src = os.path.join(sparse_dir, name)
+        dst = os.path.join(sparse_dir, "0", name)
+        shutil.move(src, dst)
+
 def extract_features(db_path, image_path, image_list):
     """
     Run COLMAP feature extraction on the provided images.
@@ -209,7 +265,7 @@ def iterative_reconstruc(source_path, db_path, image_path, output_path, image_li
     # increase until we get at least 50% ratio of reconstructed images 
 
     while rec is None and itr < max_iter:
-        clean_paths(source_path, video_n, db_path)
+        clean_paths(source_path, video_n, db_path, remove_tmp=False)
         make_folders(source_path)
 
         # Check percentage reconstructed
@@ -525,93 +581,93 @@ def interpolate_all_frames(rec, fmw):
 
 def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_res=False, average_overlap=100):
     """
-    Main pipeline function to process a video, perform reconstruction,
+    Main pipeline function to process a scene, perform reconstruction,
     and generate undistorted outputs.
-    
-    Parameters:
-        source_path (str): Base directory containing video and images.
-        n_images (int): Target number of images for reconstruction.
-        clean (bool, optional): Flag to clean existing paths before processing.
-        minimal (bool, optional): Use minimal frame selection after final reconstruction.
-        full (bool, optional): Use all frame selection after final reconstruction.
-        full_res (bool, optional): Extract final frames at full resolution.
-        average_overlap (int, optional): Target average overlap between frames.
     """
-    files_n = os.listdir(source_path)
-    video_n = None
-    for f in files_n:
-        if f.lower().endswith(('.mp4', '.mov', '.avi')):
-            video_n = f
-            break
+    input_mode, images_p, video_n = _detect_scene_mode(source_path)
+    video_p = os.path.join(source_path, video_n) if video_n else None
 
-    if video_n is None and (not ("input" in files_n)):
-        exit(1)
+    sparse_root = os.path.join(source_path, "sparse")
+    sparse_orig_path = os.path.join(sparse_root, "orig_distorted")
+    sparse_incremental_path = os.path.join(sparse_root, "incremental")
+    sparse_incremental_0_path = os.path.join(sparse_incremental_path, "0")
+    sparse_final_work_path = os.path.join(sparse_root, "final_work")
+    sparse_final_0_path = os.path.join(sparse_root, "0")
+    db_path = os.path.join(source_path, "database.db")
+    db_fin_path = os.path.join(source_path, "database_final.db")
+    undistorted_path = os.path.join(source_path, "undistorted")
 
-    video_p = os.path.join(source_path, video_n)
-    input_p = os.path.join(source_path, 'input')
-    distorted_path = os.path.join(source_path, "distorted")
-    distorted_sparse_path = os.path.join(distorted_path, "sparse")
-    distorted_sparse_final_path = os.path.join(distorted_path, "sparse_final")
-    sparse_path = os.path.join(source_path, "sparse/0")
-    db_path = os.path.join(distorted_path, "database.db")
     if clean:
         clean_paths(source_path, video_n, db_path)
     make_folders(source_path)
 
-    from video_processing import FFmpegWrapper
-    fmw = FFmpegWrapper(video_p, input_p)
+    from video_processing import FFmpegWrapper, ImageFolderWrapper
+    if input_mode == "images":
+        fmw = ImageFolderWrapper(images_p, images_p)
+    else:
+        fmw = FFmpegWrapper(video_p, images_p)
 
     n_frames = int(fmw.duration)
     frames_list = fmw.get_list_of_n_frames(n_frames)
 
-    if os.path.isfile(os.path.join(distorted_path, "orig_distorted", "images.bin")):
+    if os.path.isfile(os.path.join(sparse_orig_path, "images.bin")):
         print("Loading original reconstruction")
-        rec = pycolmap.Reconstruction(os.path.join(distorted_path, "orig_distorted"))
+        rec = pycolmap.Reconstruction(sparse_orig_path)
         frames_list = [os.path.join(fmw.tmp_path, rec.images[i].name) for i in rec.images]
     else:
-        rec, frames_list = iterative_reconstruc(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, fmw, video_n)
-        rec.write_binary(distorted_sparse_path)
-        shutil.copytree(distorted_sparse_path, os.path.join(os.path.dirname(distorted_sparse_path), "orig_distorted"))
-    
+        rec, frames_list = iterative_reconstruc(
+            source_path, db_path, fmw.tmp_path, sparse_incremental_path, frames_list, fmw, video_n
+        )
+        os.makedirs(sparse_orig_path, exist_ok=True)
+        rec.write_binary(sparse_orig_path)
+
     print(rec.summary())
 
-    if os.path.isfile(os.path.join(distorted_path, "sparse/0/", "images.bin")):
+    if os.path.isfile(os.path.join(sparse_incremental_0_path, "images.bin")):
         print("Loading dense reconstruction")
-        rec2 = pycolmap.Reconstruction(os.path.join(distorted_path, "sparse/0/"))
+        rec2 = pycolmap.Reconstruction(sparse_incremental_0_path)
         frames_list = [os.path.join(fmw.tmp_path, rec2.images[i].name) for i in rec2.images]
     else:
-        rec2, frames_list = incremental_reconstruction(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, fmw, rec, n_images, quality_threshold_avg=average_overlap)
-                            
+        rec2, frames_list = incremental_reconstruction(
+            source_path,
+            db_path,
+            fmw.tmp_path,
+            sparse_incremental_path,
+            frames_list,
+            fmw,
+            rec,
+            n_images,
+            quality_threshold_avg=average_overlap,
+        )
+
     print(rec2.summary())
-    db_fin_path = os.path.join(distorted_path, "database_final.db")
-    distorted_sparse_0_path = os.path.join(distorted_sparse_path, "0")
-    os.makedirs(distorted_sparse_0_path, exist_ok=True)
-    if os.path.isfile(os.path.join(sparse_path, "images.bin")):
+    os.makedirs(sparse_final_0_path, exist_ok=True)
+    if os.path.isfile(os.path.join(sparse_final_0_path, "images.bin")):
         print("Loading final reconstruction")
-        final = pycolmap.Reconstruction(sparse_path)
-        frames_list = [os.path.join(input_p, final.images[i].name) for i in final.images]
+        final = pycolmap.Reconstruction(sparse_final_0_path)
+        frames_list = [os.path.join(images_p, final.images[i].name) for i in final.images]
     else:
         if minimal:
             frame_indices = select_minimal_image_subset(rec2, overlap_threshold=average_overlap)
-
-        elif not full: # if full we keep all frames
+        elif not full:
             frame_indices = select_filtered_image_subset(rec2, max_num_images=n_images)
-
         else:
-            # Keep all images
             sorted_ids = sort_cameras_by_filename(rec2)
             frame_indices = sorted([_name_to_ind(rec2.images[i].name) for i in sorted_ids])
 
-        fmw.extract_specific_frames(frame_indices, full_res=full_res)
-        final, _, _ = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=False, image_list=[])
-        
-        if final is None:
-            print(" Cannot reconstruct with full matcher. Using sequential")
-            final, _, _ = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=True, image_list=[])
-            # sys.exit(1)
+        if input_mode == "video":
+            fmw.extract_specific_frames(frame_indices, full_res=full_res)
 
-        final.write_binary(distorted_sparse_0_path)
-    
+        final, _, _ = reconstruct(
+            source_path, db_fin_path, images_p, sparse_final_work_path, sequential=False, image_list=[]
+        )
+        if final is None:
+            print("Cannot reconstruct with full matcher. Using sequential")
+            final, _, _ = reconstruct(
+                source_path, db_fin_path, images_p, sparse_final_work_path, sequential=True, image_list=[]
+            )
+        final.write_binary(sparse_final_0_path)
+
     print(final.summary())
 
     if not minimal:
@@ -619,43 +675,42 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_r
         overl, _ = compute_overlaps_in_rec(rec)
         overl2, _ = compute_overlaps_in_rec(rec2)
         overlf, _ = compute_overlaps_in_rec(final)
-        print(f"Original SFM: min_overlap: {np.min(overl)}; average_overl: {np.mean(overl)}; reconstruction summary: {rec.summary()}\n\n")
-        print(f"Incremental SFM: min_overlap: {np.min(overl2)}; average_overl: {np.mean(overl2)}; reconstruction summary: {rec2.summary()}\n\n")
-        print(f"Final SFM: min_overlap: {np.min(overlf)}; average_overl: {np.mean(overlf)}; reconstruction summary: {final.summary()}\n\n")
+        print(
+            f"Original SFM: min_overlap: {np.min(overl)}; average_overl: {np.mean(overl)}; reconstruction summary: {rec.summary()}\n\n"
+        )
+        print(
+            f"Incremental SFM: min_overlap: {np.min(overl2)}; average_overl: {np.mean(overl2)}; reconstruction summary: {rec2.summary()}\n\n"
+        )
+        print(
+            f"Final SFM: min_overlap: {np.min(overlf)}; average_overl: {np.mean(overlf)}; reconstruction summary: {final.summary()}\n\n"
+        )
 
-        
         if not full:
             print("filtering reconstruction....")
-            final_filtered = filter_rec(final, input_p)
+            final_filtered = filter_rec(final, images_p)
         else:
             final_filtered = final
 
         print(final_filtered.summary())
-        shutil.rmtree(distorted_sparse_0_path)
-        os.makedirs(distorted_sparse_0_path, exist_ok=True)
-        final_filtered.write_binary(distorted_sparse_0_path)
+        shutil.rmtree(sparse_final_0_path)
+        os.makedirs(sparse_final_0_path, exist_ok=True)
+        final_filtered.write_binary(sparse_final_0_path)
 
-
-    img_undist_cmd = (
-        "colmap image_undistorter "
-        " --image_path " + input_p +
-        " --input_path " + distorted_sparse_0_path +
-        " --output_path " + source_path +
-        " --output_type COLMAP"
-    )
-    exit_code = os.system(img_undist_cmd)
-    if exit_code != 0:
-        logging.error(f"Mapper failed with code {exit_code}. Exiting.")
-        exit(exit_code)
-
-    files = os.listdir(source_path + "/sparse")
-    os.makedirs(source_path + "/sparse/0", exist_ok=True)
-    for file in files:
-        if file == '0':
-            continue
-        source_file = os.path.join(source_path, "sparse", file)
-        destination_file = os.path.join(source_path, "sparse", "0", file)
-        shutil.move(source_file, destination_file)
+    if _undistorted_ready(source_path) and not clean:
+        print("Undistorted outputs already present. Skipping image undistortion stage.")
+    else:
+        img_undist_cmd = (
+            "colmap image_undistorter "
+            " --image_path " + images_p +
+            " --input_path " + sparse_final_0_path +
+            " --output_path " + undistorted_path +
+            " --output_type COLMAP"
+        )
+        exit_code = os.system(img_undist_cmd)
+        if exit_code != 0:
+            logging.error(f"Mapper failed with code {exit_code}. Exiting.")
+            exit(exit_code)
+        _normalize_sparse_layout(undistorted_path)
 
 
 def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False, full_res=False, average_overlap=100,
@@ -681,43 +736,40 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
         diversity_weight (float, optional): Weight for diversity score in frame selection.
         confidence_weight (float, optional): Weight for confidence score in frame selection.
     """
-    files_n = os.listdir(source_path)
-    video_n = None
-    for f in files_n:
-        if f.lower().endswith(('.mp4', '.mov', '.avi')):
-            video_n = f
-            break
-
-    if video_n is None and (not ("input" in files_n)):
-        exit(1)
-
-    video_p = os.path.join(source_path, video_n)
-    input_p = os.path.join(source_path, 'input')
-    distorted_path = os.path.join(source_path, "distorted")
-    distorted_sparse_path = os.path.join(distorted_path, "sparse")
-    distorted_sparse_final_path = os.path.join(distorted_path, "sparse_final")
-    sparse_path = os.path.join(source_path, "sparse/0")
-    db_path = os.path.join(distorted_path, "database.db")
+    input_mode, images_p, video_n = _detect_scene_mode(source_path)
+    video_p = os.path.join(source_path, video_n) if video_n else None
+    sparse_root = os.path.join(source_path, "sparse")
+    sparse_orig_path = os.path.join(sparse_root, "orig_distorted")
+    sparse_incremental_path = os.path.join(sparse_root, "incremental")
+    sparse_incremental_0_path = os.path.join(sparse_incremental_path, "0")
+    sparse_final_work_path = os.path.join(sparse_root, "final_work")
+    sparse_final_0_path = os.path.join(sparse_root, "0")
+    db_path = os.path.join(source_path, "database.db")
+    db_fin_path = os.path.join(source_path, "database_final.db")
+    undistorted_path = os.path.join(source_path, "undistorted")
     
     if clean:
         clean_paths(source_path, video_n, db_path)
     make_folders(source_path)
 
-    from video_processing import FFmpegWrapper
-    fmw = FFmpegWrapper(video_p, input_p)
+    from video_processing import FFmpegWrapper, ImageFolderWrapper
+    if input_mode == "images":
+        fmw = ImageFolderWrapper(images_p, images_p)
+    else:
+        fmw = FFmpegWrapper(video_p, images_p)
 
     n_frames = int(fmw.duration)
     frames_list = fmw.get_list_of_n_frames(n_frames)
 
     # Step 1: Get initial reconstruction (same as in do_one)
-    if os.path.isfile(os.path.join(distorted_path, "orig_distorted", "images.bin")):
+    if os.path.isfile(os.path.join(sparse_orig_path, "images.bin")):
         print("Loading original reconstruction")
-        rec = pycolmap.Reconstruction(os.path.join(distorted_path, "orig_distorted"))
+        rec = pycolmap.Reconstruction(sparse_orig_path)
         frames_list = [os.path.join(fmw.tmp_path, rec.images[i].name) for i in rec.images]
     else:
-        rec, frames_list = iterative_reconstruc(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, fmw, video_n)
-        rec.write_binary(distorted_sparse_path)
-        shutil.copytree(distorted_sparse_path, os.path.join(os.path.dirname(distorted_sparse_path), "orig_distorted"))
+        rec, frames_list = iterative_reconstruc(source_path, db_path, fmw.tmp_path, sparse_incremental_path, frames_list, fmw, video_n)
+        os.makedirs(sparse_orig_path, exist_ok=True)
+        rec.write_binary(sparse_orig_path)
     
     print(rec.summary())
 
@@ -726,9 +778,9 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
     all_poses = interpolate_all_frames(rec, fmw)
     
     # Step 3: Use the interpolated poses to guide the incremental reconstruction
-    if os.path.isfile(os.path.join(distorted_path, "sparse/0/", "images.bin")):
+    if os.path.isfile(os.path.join(sparse_incremental_0_path, "images.bin")):
         print("Loading dense reconstruction")
-        rec2 = pycolmap.Reconstruction(os.path.join(distorted_path, "sparse/0/"))
+        rec2 = pycolmap.Reconstruction(sparse_incremental_0_path)
         frames_list = [os.path.join(fmw.tmp_path, rec2.images[i].name) for i in rec2.images]
     else:
         # Use advanced frame selection strategy
@@ -769,20 +821,33 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
             
             # Perform reconstruction with the selected frames
             print("Performing reconstruction with selected frames...")
-            rec2, _, _ = reconstruct(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, distorted_sparse_path, clean=False)
+            rec2, _, _ = reconstruct(
+                source_path, db_path, fmw.tmp_path, sparse_incremental_path, frames_list, sparse_incremental_path, clean=False
+            )
             
         else:
             rec2 = rec
         
         if rec2 is None:
             print("Enhanced frame selection failed, falling back to incremental reconstruction...")
-            rec2, frames_list = incremental_reconstruction(source_path, db_path, fmw.tmp_path, distorted_sparse_path, frames_list, fmw, rec, n_images, quality_threshold_avg=average_overlap)
+            rec2, frames_list = incremental_reconstruction(
+                source_path,
+                db_path,
+                fmw.tmp_path,
+                sparse_incremental_path,
+                frames_list,
+                fmw,
+                rec,
+                n_images,
+                quality_threshold_avg=average_overlap,
+            )
         else:
             # Prune low-contribution frames using advanced pruning
             print("Pruning low-contribution frames using advanced analysis...")
             from frame_selection import prune_frames
             rec2, removed_frames = prune_frames(rec2, threshold=pruning_threshold)
-            rec2.write_binary(distorted_sparse_path)
+            os.makedirs(sparse_incremental_0_path, exist_ok=True)
+            rec2.write_binary(sparse_incremental_0_path)
             
             # Update frames list after pruning
             frames_list = [os.path.join(fmw.tmp_path, rec2.images[i].name) for i in rec2.images]
@@ -792,27 +857,26 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
     print(rec2.summary())
     
     # Step 4: Final reconstruction (same as in do_one)
-    db_fin_path = os.path.join(distorted_path, "database_final.db")
-    distorted_sparse_0_path = os.path.join(distorted_sparse_path, "0")
-    os.makedirs(distorted_sparse_0_path, exist_ok=True)
+    os.makedirs(sparse_final_0_path, exist_ok=True)
     
-    if os.path.isfile(os.path.join(sparse_path, "images.bin")):
+    if os.path.isfile(os.path.join(sparse_final_0_path, "images.bin")):
         print("Loading final reconstruction")
-        final = pycolmap.Reconstruction(sparse_path)
-        frames_list = [os.path.join(input_p, final.images[i].name) for i in final.images]
+        final = pycolmap.Reconstruction(sparse_final_0_path)
+        frames_list = [os.path.join(images_p, final.images[i].name) for i in final.images]
     else:
 
         sorted_ids = sort_cameras_by_filename(rec2)
         frame_indices = sorted([_name_to_ind(rec2.images[i].name) for i in sorted_ids])
 
-        fmw.extract_specific_frames(frame_indices, full_res=full_res)
-        final, _, _ = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=False, image_list=[])
+        if input_mode == "video":
+            fmw.extract_specific_frames(frame_indices, full_res=full_res)
+        final, _, _ = reconstruct(source_path, db_fin_path, images_p, sparse_final_work_path, sequential=False, image_list=[])
         
         if final is None:
             print("Cannot reconstruct with full matcher. Using sequential")
-            final, _, _ = reconstruct(source_path, db_fin_path, input_p, distorted_sparse_final_path, sequential=True, image_list=[])
+            final, _, _ = reconstruct(source_path, db_fin_path, images_p, sparse_final_work_path, sequential=True, image_list=[])
 
-        final.write_binary(distorted_sparse_0_path)
+        final.write_binary(sparse_final_0_path)
     
     print(final.summary())
 
@@ -827,31 +891,26 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
         final_filtered = final
 
         print(final_filtered.summary())
-        shutil.rmtree(distorted_sparse_0_path)
-        os.makedirs(distorted_sparse_0_path, exist_ok=True)
-        final_filtered.write_binary(distorted_sparse_0_path)
+        shutil.rmtree(sparse_final_0_path)
+        os.makedirs(sparse_final_0_path, exist_ok=True)
+        final_filtered.write_binary(sparse_final_0_path)
 
     # Step 5: Image undistortion (same as in do_one)
-    img_undist_cmd = (
-        "colmap image_undistorter "
-        " --image_path " + input_p +
-        " --input_path " + distorted_sparse_0_path +
-        " --output_path " + source_path +
-        " --output_type COLMAP"
-    )
-    exit_code = os.system(img_undist_cmd)
-    if exit_code != 0:
-        logging.error(f"Mapper failed with code {exit_code}. Exiting.")
-        exit(exit_code)
-
-    files = os.listdir(source_path + "/sparse")
-    os.makedirs(source_path + "/sparse/0", exist_ok=True)
-    for file in files:
-        if file == '0':
-            continue
-        source_file = os.path.join(source_path, "sparse", file)
-        destination_file = os.path.join(source_path, "sparse", "0", file)
-        shutil.move(source_file, destination_file)
+    if _undistorted_ready(source_path) and not clean:
+        print("Undistorted outputs already present. Skipping image undistortion stage.")
+    else:
+        img_undist_cmd = (
+            "colmap image_undistorter "
+            " --image_path " + images_p +
+            " --input_path " + sparse_final_0_path +
+            " --output_path " + undistorted_path +
+            " --output_type COLMAP"
+        )
+        exit_code = os.system(img_undist_cmd)
+        if exit_code != 0:
+            logging.error(f"Mapper failed with code {exit_code}. Exiting.")
+            exit(exit_code)
+        _normalize_sparse_layout(undistorted_path)
 
 
 def select_minimal_image_subset(rec, overlap_threshold=50, max_gap=30):

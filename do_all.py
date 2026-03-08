@@ -21,6 +21,26 @@ from argparse import ArgumentParser
 
 # Get the current script directory
 CURR_PATH = os.path.dirname(os.path.abspath(__file__))
+VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v')
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')
+
+
+def detect_source_mode(source_p):
+    images_p = os.path.join(source_p, 'images')
+    has_images = os.path.isdir(images_p) and any(
+        f.lower().endswith(IMAGE_EXTENSIONS) for f in os.listdir(images_p)
+    )
+    video_n = next((f for f in sorted(os.listdir(source_p)) if f.lower().endswith(VIDEO_EXTENSIONS)), None)
+
+    if has_images:
+        if video_n:
+            print("Detected both video and images/. Assuming video already processed and using images/.")
+        return "images", video_n
+
+    if video_n:
+        return "video", video_n
+
+    return None, None
 
 def get_video_length(filename):
     """
@@ -88,36 +108,31 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=
     """
     start_time = time.time()
     
-    # Find video file in the source directory
-    files_n = os.listdir(source_p)
-    video_n = None
-    for f in files_n:
-        if f.lower().endswith(('.mp4', '.mov', '.avi')):
-            video_n = f
-            break
-    
-    if video_n is None and "input" not in files_n:
-        print(f"Error: No video file found in {source_p}")
+    source_mode, video_n = detect_source_mode(source_p)
+    if source_mode is None:
+        print(f"Error: Expected either images/ with images or one video file in {source_p}")
         return False
     
     # Define output directories
-    images_p = os.path.join(source_p, 'images')
-    sparse_p = os.path.join(source_p, 'sparse')
+    undistorted_images_p = os.path.join(source_p, 'undistorted', 'images')
+    undistorted_sparse_p = os.path.join(source_p, 'undistorted', 'sparse', '0', 'images.bin')
     model_p = os.path.join(source_p, 'model')
     depths_p = os.path.join(source_p, 'd_images')
     
     print(f"\n{'='*80}")
     print(f"Processing: {source_p}")
-    if video_n:
+    if source_mode == "video" and video_n:
         print(f"Video: {video_n}")
         video_path = os.path.join(source_p, video_n)
         duration, frame_count, fps = get_video_length(video_path)
         if duration:
             print(f"Video duration: {duration}s, {frame_count} frames, {fps} FPS")
+    else:
+        print("Input mode: images/")
     print(f"{'='*80}\n")
     
     # Step 1: Extract frames and perform SfM
-    if not (os.path.isdir(images_p) and os.path.isdir(sparse_p)) or clean:
+    if not (os.path.isdir(undistorted_images_p) and os.path.isfile(undistorted_sparse_p)) or clean:
         print("\n--- Step 1: Frame extraction and Structure from Motion ---")
         sfm_command = f"python preprocess/main_video_process.py -s {source_p} -n {n_frames} --robust"
         
@@ -154,9 +169,12 @@ def do_one(source_p, n_frames, clean=False, minimal=False, full=False, full_res=
     
     # Step 4: Train 3D Gaussian Splatting
     print("\n--- Step 4: 3D Gaussian Splatting training ---")
+    train_data_dir = os.path.join(source_p, "undistorted")
+    if not os.path.isdir(train_data_dir):
+        train_data_dir = source_p
     train_cmd = (
         "conda run -n gsplat --no-capture-output CUDA_VISIBLE_DEVICES=0 python /v2gs/submodules/gsplat/examples/simple_trainer.py mcmc"
-        f" --data_dir {source_p}  --data_factor 1 --result_dir {model_p}"
+        f" --data_dir {train_data_dir}  --data_factor 1 --result_dir {model_p}"
         f" --save-ply --pose-opt --depth-loss --disable-viewer --visible-adam --app-opt"
     )
 
@@ -224,7 +242,7 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser(description="Video to 3D Gaussian Splatting Pipeline")
     parser.add_argument("--source_path", "-s", required=True, type=str,
-                        help="Path to the directory containing the video. Use aboslute path! /v2gs/dataset_gs/your_folder")
+                        help="Path to the scene directory. Scene root must contain either images/ or a video file.")
     parser.add_argument("--max_number_of_frames", "-n", default=400, type=int,
                         help="Maximum number of frames to extract (default: 400)")
     parser.add_argument("--clean", "-c", action='store_true',

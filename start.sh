@@ -48,4 +48,4 @@ echo "Using X11 socket: $X11_SOCKET_PATH"
 echo "Using dataset path: $DATASET_GS_PATH"
 
 # Run the container
-docker compose run --rm v2gs
+docker compose run --rm --user "$(id -u):$(id -g)" v2gs
