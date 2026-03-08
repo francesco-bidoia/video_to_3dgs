@@ -118,7 +118,7 @@ def clean_paths(source_path, video_n, db_path):
     if os.path.isfile(db_path):
         os.remove(db_path)
     all_files = os.listdir(source_path)
-    if video_n in all_files:
+    if video_n and video_n in all_files:
         all_files.remove(video_n)
     if "tmp" in all_files:
         all_files.remove("tmp")

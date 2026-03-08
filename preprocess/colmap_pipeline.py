@@ -523,7 +523,7 @@ def interpolate_all_frames(rec, fmw):
     
     return all_poses
 
-def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_res=False, average_overlap=100):
+def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_res=False, average_overlap=100, images_path=None):
     """
     Main pipeline function to process a video, perform reconstruction,
     and generate undistorted outputs.
@@ -539,15 +539,16 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_r
     """
     files_n = os.listdir(source_path)
     video_n = None
-    for f in files_n:
-        if f.lower().endswith(('.mp4', '.mov', '.avi')):
-            video_n = f
-            break
+    if images_path is None:
+        for f in files_n:
+            if f.lower().endswith(('.mp4', '.mov', '.avi')):
+                video_n = f
+                break
 
-    if video_n is None and (not ("input" in files_n)):
-        exit(1)
+        if video_n is None and (not ("input" in files_n)):
+            exit(1)
 
-    video_p = os.path.join(source_path, video_n)
+    video_p = os.path.join(source_path, video_n) if video_n else None
     input_p = os.path.join(source_path, 'input')
     distorted_path = os.path.join(source_path, "distorted")
     distorted_sparse_path = os.path.join(distorted_path, "sparse")
@@ -558,8 +559,11 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_r
         clean_paths(source_path, video_n, db_path)
     make_folders(source_path)
 
-    from video_processing import FFmpegWrapper
-    fmw = FFmpegWrapper(video_p, input_p)
+    from video_processing import FFmpegWrapper, ImageFolderWrapper
+    if images_path:
+        fmw = ImageFolderWrapper(images_path, input_p)
+    else:
+        fmw = FFmpegWrapper(video_p, input_p)
 
     n_frames = int(fmw.duration)
     frames_list = fmw.get_list_of_n_frames(n_frames)
@@ -660,7 +664,7 @@ def do_one(source_path, n_images, clean=False, minimal=False, full=False, full_r
 
 def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False, full_res=False, average_overlap=100,
                  random_ratio=0.2, pruning_threshold=0.05, coverage_weight=0.4, triangulation_weight=0.3,
-                 diversity_weight=0.2, confidence_weight=0.1):
+                 diversity_weight=0.2, confidence_weight=0.1, images_path=None):
     """
     Enhanced pipeline function to process a video, perform reconstruction with robust frame selection,
     and generate undistorted outputs. This version uses camera pose interpolation to make better
@@ -683,15 +687,16 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
     """
     files_n = os.listdir(source_path)
     video_n = None
-    for f in files_n:
-        if f.lower().endswith(('.mp4', '.mov', '.avi')):
-            video_n = f
-            break
+    if images_path is None:
+        for f in files_n:
+            if f.lower().endswith(('.mp4', '.mov', '.avi')):
+                video_n = f
+                break
 
-    if video_n is None and (not ("input" in files_n)):
-        exit(1)
+        if video_n is None and (not ("input" in files_n)):
+            exit(1)
 
-    video_p = os.path.join(source_path, video_n)
+    video_p = os.path.join(source_path, video_n) if video_n else None
     input_p = os.path.join(source_path, 'input')
     distorted_path = os.path.join(source_path, "distorted")
     distorted_sparse_path = os.path.join(distorted_path, "sparse")
@@ -703,8 +708,11 @@ def do_one_robust(source_path, n_images, clean=False, minimal=False, full=False,
         clean_paths(source_path, video_n, db_path)
     make_folders(source_path)
 
-    from video_processing import FFmpegWrapper
-    fmw = FFmpegWrapper(video_p, input_p)
+    from video_processing import FFmpegWrapper, ImageFolderWrapper
+    if images_path:
+        fmw = ImageFolderWrapper(images_path, input_p)
+    else:
+        fmw = FFmpegWrapper(video_p, input_p)
 
     n_frames = int(fmw.duration)
     frames_list = fmw.get_list_of_n_frames(n_frames)
