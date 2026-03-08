@@ -48,11 +48,15 @@ RUN apt update && apt-get install -y \
     libceres-dev \
     libomp-dev
 
+RUN apt update && apt-get install -y \
+    libopenimageio-dev openimageio-tools \
+    openexr libopenexr-dev libopencv-dev
+
 WORKDIR /tmp/
-RUN git clone https://github.com/colmap/colmap.git
+RUN git clone --recursive https://github.com/colmap/colmap.git
 WORKDIR /tmp/colmap
 
-RUN git checkout 682ea9ac4020a143047758739259b3ff04dabe8d &&\
+RUN git fetch && git checkout ada915d1fe8140fe6b873ce94d16fa772f805978 &&\
     mkdir build && cd build &&\
     cmake .. -GNinja \
     -DCMAKE_CUDA_ARCHITECTURES=all-major \
@@ -60,27 +64,34 @@ RUN git checkout 682ea9ac4020a143047758739259b3ff04dabe8d &&\
     ninja &&\
     ninja install
 
-# Install DepthAnything dependencies
-COPY ./submodules/DepthAnythingV2_docker/requirements.txt /tmp/requirements.txt
-WORKDIR /tmp/
 
-RUN pip install -r requirements.txt
-RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
+# # Install DepthAnything dependencies
+# COPY ./submodules/DepthAnythingV2_docker/requirements.txt /tmp/requirements.txt
+# WORKDIR /tmp/
 
-# Install gsplat
-COPY ./environment_gsplat.yml ./environment_gsplat.yml
-RUN conda env create --file environment_gsplat.yml
+# RUN pip install -r requirements.txt
+# RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
 
-RUN conda run -n gsplat python -m pip install ninja numpy jaxtyping rich fsspec
-COPY ./requirements_gsplat.txt ./requirements_gsplat.txt
-RUN conda run -n gsplat python -m pip install -r ./requirements_gsplat.txt
+# # Install gsplat
+# COPY ./environment_gsplat.yml ./environment_gsplat.yml
+# RUN conda env create --file environment_gsplat.yml
 
-RUN conda run -n gsplat python -m pip install gsplat --index-url https://docs.gsplat.studio/whl/pt24cu124
+# RUN conda run -n gsplat python -m pip install ninja numpy jaxtyping rich fsspec
+# COPY ./requirements_gsplat.txt ./requirements_gsplat.txt
+# RUN conda run -n gsplat python -m pip install -r ./requirements_gsplat.txt
 
-COPY ./submodules/gsplat/examples/requirements.txt ./requirements.txt
-RUN conda run -n gsplat python -m pip install -r ./requirements.txt
+# RUN conda run -n gsplat python -m pip install gsplat --index-url https://docs.gsplat.studio/whl/pt24cu124
+
+# COPY ./submodules/gsplat/examples/requirements.txt ./requirements.txt
+# RUN conda run -n gsplat python -m pip install -r ./requirements.txt
 
 WORKDIR /v2gs
+
+# OpenAI codex
+RUN apt-get update && apt-get install -y curl \
+ && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y nodejs \
+ && npm install -g @openai/codex
 
 # This error occurs because there’s a conflict between the threading layer used
 # by Intel MKL (Math Kernel Library) and the libgomp library, 

@@ -4,7 +4,7 @@ services:
     stdin_open: true
     tty: true
     build: .
-    image: v2gs:cuda-12.4-1.0
+    image: v2gs:test
     network_mode: "host"
     shm_size: 8gb
     environment:
@@ -19,6 +19,9 @@ services:
       - type: bind
         source: ./
         target: /v2gs
+      - type: bind
+        source: /mnt/f
+        target: /v2gs/hdd
       - type: bind
         source: ${DATASET_GS_PATH:-../datasets_gs}
         target: /v2gs/datasets_gs
